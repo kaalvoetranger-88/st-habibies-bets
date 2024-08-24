@@ -30,6 +30,8 @@ os.makedirs(app_dir, exist_ok=True)
 os.makedirs(data_dir, exist_ok=True)
 os.chdir(app_dir)
 os.getcwd()
+g_url1 = 'https://github.com/kaalvoetranger-88/st-habibies-bets/blob/main/datasets/matches.csv'
+g_url2 = 'https://github.com/kaalvoetranger-88/st-habibies-bets/blob/main/datasets/atp_players.csv'
 
 # import the applications functions  
 from elo_funcs import initialize_elo_ratings, get_elo, update_elo, expected_outcome
@@ -48,8 +50,8 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # Load Data
 @st.cache_data 
 def load_data():
-    matches = pd.read_csv(data_dir + "matches.csv")
-    players = pd.read_csv(data_dir + "atp_players.csv")
+    matches = pd.read_csv(g_url1)
+    players = pd.read_csv(g_url2)
     players['Player Name'] = players['name_first'] + ' ' + players['name_last']    
     players['dob'] = players['dob'].astype(str)
     players['dob'] = players['dob'].apply(lambda x: x[:8] if len(x[:8]) == 8 and x[:8].isdigit() else '15000101')
