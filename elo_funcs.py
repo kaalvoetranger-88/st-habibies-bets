@@ -17,8 +17,8 @@ import plotly.graph_objs as go
 import streamlit as st
 
 #%% local variables (these are generated in main.py)
-app_dir = os.path.expanduser("~/Desktop/tennis_app/")
-data_dir = os.path.expanduser("~/Desktop/tennis_app/datasets/")
+app_dir = os.getcwd()
+data_dir = os.path.expanduser("~app_dir/datasets/")
 matches = pd.read_csv(data_dir + "matches.csv")
 players = pd.read_csv(data_dir + "atp_players.csv")
     
