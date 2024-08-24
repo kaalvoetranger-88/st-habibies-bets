@@ -19,8 +19,10 @@ import streamlit as st
 #%% local variables (these are generated in main.py)
 app_dir = os.getcwd()
 data_dir = os.path.expanduser("~app_dir/datasets/")
-matches = pd.read_csv(data_dir + "matches.csv")
-players = pd.read_csv(data_dir + "atp_players.csv")
+g_url1 = 'https://github.com/kaalvoetranger-88/st-habibies-bets/blob/main/datasets/matches.csv'
+g_url2 = 'https://github.com/kaalvoetranger-88/st-habibies-bets/blob/main/datasets/matches.csv'
+matches = pd.read_csv(g_url1)
+players = pd.read_csv(g_url2)
     
 #%% functions for elo calculations
 
