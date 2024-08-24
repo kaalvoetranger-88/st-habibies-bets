@@ -24,8 +24,8 @@ import time
 import requests
 
 # set local directories 
-app_dir = os.path.expanduser("~/Desktop/tennis_app/")
-data_dir = os.path.expanduser("~/Desktop/tennis_app/datasets/")
+app_dir = os.getcwd()
+data_dir = os.path.expanduser("~/app_dir/datasets/")
 os.makedirs(app_dir, exist_ok=True)
 os.makedirs(data_dir, exist_ok=True)
 os.chdir(app_dir)
