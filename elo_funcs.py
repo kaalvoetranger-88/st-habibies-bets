@@ -20,7 +20,7 @@ import streamlit as st
 app_dir = os.getcwd()
 data_dir = os.path.expanduser("~app_dir/datasets/")
 g_url1 = 'https://github.com/kaalvoetranger-88/st-habibies-bets/blob/main/datasets/matches.csv'
-g_url2 = 'https://github.com/kaalvoetranger-88/st-habibies-bets/blob/main/datasets/matches.csv'
+g_url2 = 'https://github.com/kaalvoetranger-88/st-habibies-bets/blob/main/datasets/atp_players.csv'
 matches = pd.read_csv(g_url1)
 players = pd.read_csv(g_url2)
     
