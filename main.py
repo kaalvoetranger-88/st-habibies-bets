@@ -51,8 +51,8 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # Load match and player data
 @st.cache_data 
 def load_data():
-    matches = pd.read_csv(data_dir + "matches.csv")
-    players = pd.read_csv(data_dir + "atp_players.csv")
+    matches = pd.read_csv(g_url1)
+    players = pd.read_csv(g_url2)
     players['Player Name'] = players['name_first'] + ' ' + players['name_last']    
     players['dob'] = players['dob'].astype(str)
     players['dob'] = players['dob'].apply(lambda x: x[:8] if len(x[:8]) == 8 and x[:8].isdigit() else '15000101')
