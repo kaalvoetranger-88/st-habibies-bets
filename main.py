@@ -33,25 +33,26 @@ os.getcwd()
 g_url1 = 'https://raw.githubusercontent.com/kaalvoetranger-88/st-habibies-bets/main/datasets/matches.csv'
 g_url2 = 'https://raw.githubusercontent.com/kaalvoetranger-88/st-habibies-bets/main/datasets/atp_players.csv'
 
-# import the applications functions  
+# import the application functions from elo_funcs.py  
 from elo_funcs import initialize_elo_ratings, get_elo, update_elo, expected_outcome
 from elo_funcs import calculate_and_analyze_elo, simulate_match, t_simulate_match, simulate_round, simulate_tournament, player_info_tool
 from elo_funcs import decimal_to_fractional, decimal_to_american, fractional_to_decimal, fractional_to_american
 from elo_funcs import american_to_decimal, american_to_fractional, calculate_payout, implied_probability
+from elo_funcs import calculate_age, plot_player_elo
 
 import warnings
 # Ignore specific types of warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-#%% 2 data ingest and initialization
+#%% 2 data ingest, initialization, and caching logic:
 
 
-# Load Data
+# Load match and player data
 @st.cache_data 
 def load_data():
-    matches = pd.read_csv(g_url1)
-    players = pd.read_csv(g_url2)
+    matches = pd.read_csv(data_dir + "matches.csv")
+    players = pd.read_csv(data_dir + "atp_players.csv")
     players['Player Name'] = players['name_first'] + ' ' + players['name_last']    
     players['dob'] = players['dob'].astype(str)
     players['dob'] = players['dob'].apply(lambda x: x[:8] if len(x[:8]) == 8 and x[:8].isdigit() else '15000101')
@@ -63,31 +64,190 @@ def load_data():
 
 # matches and players must load before running the elo calcs
 matches, players = load_data()
-
+max_d = max(matches['tourney_date'])
 
 # Cache the main calculation function
 @st.cache_data
 def get_elo_and_matches():
-    elo_df, matches = calculate_and_analyze_elo()
+    elo_df, matches= calculate_and_analyze_elo()
+    print('initialization success...')
     return elo_df, matches
 
 
-# Run the calculation once and store results in session state
+# Run model calculations once and store results in session state
 if 'elo_df' not in st.session_state or 'matches' not in st.session_state:
     st.session_state.elo_df, st.session_state.matches = get_elo_and_matches()
-
+    print('Elo dataframe and matches dataframes have been updated.')
 # Access the cached data
 elo_df = st.session_state.elo_df
 matches = st.session_state.matches
 
-print('initialization success...')
+
+# Caching functions to optimize performance
+@st.cache_data
+def get_player_info(player_input, players, elo_df):
+    #st.write("Available index in elo_df:", elo_df.index)                       # Debugging print statements
+    #st.write("Available player names in players DataFrame:", players['Player Name'].tolist())  # Debugging print statements
+
+    # Check if the player exists in elo_df index
+    player_info = elo_df.loc[elo_df.index.str.contains(player_input, case=False)]
+
+    if not player_info.empty:
+        player_name = player_info.index[0]
+
+        # Convert the player names in the players DataFrame to a consistent format
+        players_index = players['Player Name'].str.strip().str.lower()
+        player_name_lower = player_name.strip().lower()
+
+        if player_name_lower in players_index.str.lower().values:
+            # Retrieve the correct index for the player_name
+            player_row = players[players['Player Name'].str.strip().str.lower() == player_name_lower]
+            dob = player_row['dob'].values[0]  # Retrieve DOB from the players DataFrame
+            age = calculate_age(dob)
+            #win_percentage = player_row['Win_Percentage'].values[0]
+            return {
+                "age": age,
+                "elo_all": player_info['Elo_ALL'].values[0],
+                "elo_grass": player_info['Elo_Grass'].values[0],
+                "elo_clay": player_info['Elo_Clay'].values[0],
+                "elo_hard": player_info['Elo_Hard'].values[0],
+                "win_percentage": f"{player_info['Win_Percentage'].values[0]:.1f}"
+            }
+            print(f'{player_name} info calculated and cached')
+        else:
+            st.write(f"Player '{player_name}' not found in the players DataFrame.")
+            return None
+    else:
+        st.write(f"Player '{player_input}' not found in the elo_df DataFrame.")
+        return None
+
+
+@st.cache_data
+def prepare_ranking_and_elo_graph(player_name, matches):
+    # Ensure that the DataFrame has the necessary columns
+    required_columns = ['winner_name', 'loser_name', 'WRank', 'LRank', 'elo_winner_after', 'elo_loser_after', 'tourney_date']
+    if all(col in matches.columns for col in required_columns):
+        # Filter rows where the player is either a winner or a loser
+        player_matches = matches[
+            (matches['winner_name'].str.contains(player_name, case=False, na=False)) |
+            (matches['loser_name'].str.contains(player_name, case=False, na=False))
+        ]
+        
+        # Create lists to store ranking and Elo rating data
+        rankings = []
+        elo_ratings = []
+        dates = []  # store dates dynamically for plotting
+        
+        # Determine if player is in the winner or loser column and get the relevant data
+        for index, row in player_matches.iterrows():
+            if player_name.lower() in row['winner_name'].lower():
+                rankings.append(row['WRank'])
+                elo_ratings.append(row['elo_winner_after'])
+            else:
+                rankings.append(row['LRank'])
+                elo_ratings.append(row['elo_loser_after'])
+            
+            dates.append(row['tourney_date'])
+        
+        # Create a DataFrame for the graph
+        graph_data = pd.DataFrame({
+            'tourney_date': dates,
+            'Player_Rank': rankings,
+            'Player_Elo_After': elo_ratings
+        })
+        print('Ranking and Elo info updated in cache')
+        return graph_data
+    
+    else:
+        st.write("One or more required columns are missing in the matches DataFrame.")
+        return pd.DataFrame()  # Return an empty DataFrame or handle the error appropriately
+
+h2h_record = None
+@st.cache_data
+def calculate_head_to_head(player_1, player_2, matches):
+    # Filter matches where either player 1 or player 2 is involved
+    h2h_matches = matches[
+        ((matches['winner_name'].str.contains(player_1, case=False)) & 
+         (matches['loser_name'].str.contains(player_2, case=False))) |
+        ((matches['winner_name'].str.contains(player_2, case=False)) & 
+         (matches['loser_name'].str.contains(player_1, case=False)))
+    ]
+    
+    if isinstance(h2h_matches, pd.DataFrame) and not h2h_matches.empty:
+        # Count wins for player 1 and player 2
+        player_1_wins = len(h2h_matches[h2h_matches['winner_name'].str.contains(player_1, case=False)])
+        player_2_wins = len(h2h_matches[h2h_matches['winner_name'].str.contains(player_2, case=False)])
+        
+        # Handle edge case where there are no losses (to avoid division by zero)
+        if player_2_wins > 0:
+            h2h_record = player_1_wins / player_2_wins  # Calculate win/loss ratio as a float
+        else:
+            h2h_record = float(player_1_wins)  # Assign default value if player_2_wins is zero
+            
+        print(f"H2H info updated in cache: {h2h_record} (as float)")
+        
+        # Return both the head-to-head record and the match info DataFrame
+        return h2h_record, h2h_matches[['tourney_date', 'Tournament', 'surface', 'Round',
+                                        'winner_name', 'loser_name', 'Scores']]
+    else:
+        return 1.0, pd.DataFrame()  # Return default values if no matches are found
+
+
+
+def expected_out(player1, player2, surface, matches=matches, weight_surface=0.9, h2h_weight=15):
+    weight_all = 1 - weight_surface
+    
+    # Get Elo ratings from elo_df
+    elo1_all = elo_df.loc[player1]
+    elo2_all = elo_df.loc[player2]
+    
+    # Determine surface-specific Elo ratings
+    if surface == "Clay":
+        elo1_surface = elo1_all[2]
+        elo2_surface = elo2_all[2]
+    elif surface == "Hard":
+        elo1_surface = elo1_all[3]
+        elo2_surface = elo2_all[3]
+    elif surface == "Grass":
+        elo1_surface = elo1_all[1]
+        elo2_surface = elo2_all[1]
+    else:
+        elo1_surface = elo1_all[0]
+        elo2_surface = elo2_all[0]
+    
+    # Combine overall and surface-specific Elo ratings
+    combined_elo1 = weight_all * elo1_all[0] + weight_surface * elo1_surface
+    combined_elo2 = weight_all * elo2_all[0] + weight_surface * elo2_surface
+    
+    # Calculate probabilities
+    expected_probA = 1 / (1 + 10 ** ((elo2_all[0] - elo1_all[0]) / 400))
+    expected_probS = 1 / (1 + 10 ** ((combined_elo2 - combined_elo1) / 400))
+    
+    # Calculate head-to-head record and get the relevant match info
+    h2h_record, h2h_matches_info = calculate_head_to_head(player1, player2, matches)
+    # Adjust Elo with head-to-head weight
+    combined_elo1 += h2h_weight * h2h_record
+    # Calculate head-to-head record and get the relevant match info
+    h2h_record, h2h_matches_info = calculate_head_to_head(player2, player1, matches)
+    # Adjust Elo with head-to-head weight
+    combined_elo2 += h2h_weight * h2h_record
+    # Final probability after head-to-head adjustment
+    expected_probH = 1 / (1 + 10 ** ((combined_elo2 - combined_elo1) / 400))
+    
+    # Return probabilities and head-to-head match info DataFrame
+    return expected_probA, expected_probS, expected_probH
 
 
 #%% 3 layout
 
+
 # Sidebar for navigation 
-st.sidebar.image('logo.png', width=200)
-st.sidebar.title("HaBibie Bets")
+st.sidebar.code("Build: 0.9        2024-08-27")
+st.sidebar.code(f"Most Recent Match = {max_d}")
+st.sidebar.divider()
+st.sidebar.image('logo.png', width=300)
+#st.sidebar.divider()
+#st.sidebar.title("HABIBIE BETS")
 tool = st.sidebar.radio("Choose a tool:", ("Player Info", "Player Comparison", "Match Maker", "Odds Converter", "Draw Simulator"))
 
 # Theme Colors
@@ -113,17 +273,167 @@ st.markdown(f"""
 #%% 4 main content and tools
 
 
-# Mock-up for the main content based on the selected tool
+# Main content based on the selected tool
+# player info tool
 if tool == "Player Info":
     st.header("Player Info Tool:")
-    st.write("This tool will display player-specific data.")
+    st.write("This tool displays player-specific data.")
     player_info_tool(players, matches, elo_df)
-    # Placeholder for player selection and display
-
+    
+# player comparison tool
 elif tool == "Player Comparison":
-    st.header("Player Comparison Tool")
-    st.write("This tool will allow you to compare two players.")
-    # Placeholder for comparison charts
+    st.title("Player Comparison Tool")
+    # Two columns for player comparison
+    col1, col2 = st.columns(2)
+    # Player 1 Input
+    with col1:
+        player_1_input = st.text_input("Search Player 1")
+        if player_1_input:
+            player_1_info = get_player_info(player_1_input, players, elo_df)
+            if player_1_info:
+                st.subheader(f"{player_1_input}")
+                st.write(f"Age: {player_1_info['age']}")
+                #st.write(f"Overall Elo: {player_1_info['elo_all']}")
+                #st.write(f"Grass Elo: {player_1_info['elo_grass']}")
+                #st.write(f"Clay Elo: {player_1_info['elo_clay']}")
+                #st.write(f"Hard Elo: {player_1_info['elo_hard']}")
+                st.write(f"Win Percentage: {player_1_info['win_percentage']}%")
+                player_1_chart = plot_player_elo(player_1_info, 
+                                                 player_1_input,
+                                                 position='left')
+                st.plotly_chart(player_1_chart)
+            else:
+                st.write("Player 1 not found.")
+
+    # Player 2 Input
+    with col2:
+        player_2_input = st.text_input("Search Player 2")
+        if player_2_input:
+            player_2_info = get_player_info(player_2_input, players, elo_df)
+            if player_2_info:
+                st.subheader(f"{player_2_input}")
+                st.write(f"Age: {player_2_info['age']}")
+                #st.write(f"Overall Elo: {player_2_info['elo_all']}")
+                #st.write(f"Grass Elo: {player_2_info['elo_grass']}")
+                #st.write(f"Clay Elo: {player_2_info['elo_clay']}")
+                #st.write(f"Hard Elo: {player_2_info['elo_hard']}")
+                st.write(f"Win Percentage: {player_2_info['win_percentage']}%")
+                # Display Player 2 Elo Horizontal Bar Chart
+                player_2_chart = plot_player_elo(player_2_info, 
+                                                 player_2_input,
+                                                 position='right')
+                st.plotly_chart(player_2_chart)
+            else:
+                st.write("Player 2 not found.")
+
+    # Plot rankings and Elo ratings over time for both players
+    if player_1_input and player_2_input:
+        player_1_graph_data = prepare_ranking_and_elo_graph(player_1_input, matches)
+        player_2_graph_data = prepare_ranking_and_elo_graph(player_2_input, matches)
+        #st.write(f"Player 1 Data:\n{player_1_graph_data.head()}")             # Debugging print statements
+        #st.write(f"Player 2 Data:\n{player_2_graph_data.head()}")             # Debugging print statements
+
+        if not player_1_graph_data.empty and not player_2_graph_data.empty:
+            fig = go.Figure()
+
+            # Player 1 data
+            fig.add_trace(go.Scatter(
+                x=player_1_graph_data['tourney_date'],
+                y=player_1_graph_data['Player_Rank'],
+                mode='lines',
+                name=f'{player_1_input} Ranking',
+                line=dict(color='blue'),
+                yaxis='y1'
+                ))
+
+            fig.add_trace(go.Scatter(
+                x=player_1_graph_data['tourney_date'],
+                y=player_1_graph_data['Player_Elo_After'],
+                mode='markers',
+                name=f'{player_1_input} Elo Rating',
+                line=dict(color='darkblue'),
+                yaxis='y2'
+                ))
+
+            # Player 2 data
+            fig.add_trace(go.Scatter(
+                x=player_2_graph_data['tourney_date'],
+                y=player_2_graph_data['Player_Rank'],
+                mode='lines',
+                name=f'{player_2_input} Ranking',
+                line=dict(color='red'),
+                yaxis='y1'
+                ))
+
+            fig.add_trace(go.Scatter(
+                x=player_2_graph_data['tourney_date'],
+                y=player_2_graph_data['Player_Elo_After'],
+                mode='markers',
+                name=f'{player_2_input} Elo Rating',
+                line=dict(color='darkred'),
+                yaxis='y2'
+                ))
+
+            # Layout for dual-axis graph
+            fig.update_layout(
+                title=f"Comparison of {player_1_input} and {player_2_input}",
+                xaxis_title="Date",
+                yaxis=dict(
+                    title='Player Ranking',
+                    side='left',
+                    showgrid=False,
+                    zeroline=False,
+                    autorange="reversed",
+                    ),
+                yaxis2=dict(
+                    title='Player Elo Rating',
+                    side='right',
+                    overlaying='y',
+                    showgrid=False,
+                    zeroline=False,
+                    ),
+                legend=dict(x=0.5, y=1.1, xanchor='center', orientation='h'),
+                )
+
+            # Display the plot
+            st.plotly_chart(fig)
+        else:
+            st.write("Not enough data to display the comparison graph.")
+
+        # Display Head-to-Head Matches
+        st.subheader("Head-to-Head Results")
+        h2h_record, h2h_matches = calculate_head_to_head(player_1_input, player_2_input, matches)
+
+        if not h2h_matches.empty:
+            st.dataframe(h2h_matches, hide_index=True)
+        else:
+            st.write(f"No head-to-head matches found between {player_1_input} and {player_2_input}.")
+            
+            # Create a two-column layout    
+        st.divider()
+        col3, col4 = st.columns(2)
+    
+        # Surface selection button in col3
+        with col3:
+            st.subheader("Estimating Outcomes:")
+    
+            # Dropdown menu to select the surface
+            elo_surface = st.selectbox("Select Court Surface", options=["All Surfaces", "Grass", "Clay", "Hard"])
+    
+            # Button to calculate the expected probability
+            calculate_button = st.button("Calculate Expected Probability")
+    
+            if calculate_button and player_1_info and player_2_info:
+                # Get the Elo ratings based on the chosen surface
+                expected_probA, expected_probS, expected_probH = expected_out(player_1_input, player_2_input, elo_surface)
+                # Display the result in an f-string
+                st.write(f":b: The BASELINE expected probability of {player_1_input} beating {player_2_input} is {expected_probA*100:.1f}%")
+                st.write(f":sparkle: The expected probability of {player_1_input} beating {player_2_input} on {elo_surface} is {expected_probS*100:.1f}%")
+                st.write(f":eight_spoked_asterisk: The expected probability of {player_1_input} beating {player_2_input} on {elo_surface} with H2H is {expected_probH*100:.1f}%")
+                print('Just dropped some dope stats...')
+        with col4:
+            st.write("placeholder", "")
+            st.write("More stuff coming soon")
 
 elif tool == "Match Maker":
     st.header("Match Maker Tool")
@@ -202,7 +512,6 @@ elif tool == "Odds Converter":
     If the decimal odds are 2.00, the implied probability is **50%** (1 / 2.00 = 0.50).
     """)
 
-
 # Main section for "Draw Simulator Tool"
 elif tool == "Draw Simulator":
     st.header("Draw Simulator Tool")
@@ -249,15 +558,6 @@ elif tool == "Draw Simulator":
                 with match_details:
                     st.text(match_output.getvalue())
 
-                # Visualize the tournament progress using matplotlib
-                fig, ax = plt.subplots()
-                ax.barh(player_df['Player'], range(len(player_df), 0, -1))  # Placeholder for actual positions
-                ax.set_xlabel("Progress in Tournament")
-                ax.set_title("Tournament Simulation Results")
-                st.pyplot(fig)
-
         else:
             st.error("CSV file must contain a column named 'Player' with player names.")           
             
-#%% 5 not yet know | scratch
-
