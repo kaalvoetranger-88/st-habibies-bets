@@ -12,11 +12,10 @@ ABOUT: These are mainly helper functions for main.py that don't need data cachin
 #%% dependencies
 
 import pandas as pd
-import requests
 import numpy as np
 import os
-import time
 import plotly.graph_objs as go
+from datetime import datetime
 import streamlit as st
 
 #%% local variables (these are generated in main.py)
