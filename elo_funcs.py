@@ -76,20 +76,20 @@ def update_elo(winner, loser, elo_dict, K=32):
 def expected_outcome(player1, player2, surface, weight_surface=0.9, h2h_weight=10):
     weight_all = 1 - weight_surface
     
-    elo1_all = elo_df.loc[player1]
-    elo2_all = elo_df.loc[player2]
+    elo1_all = elo_ratings_all[player1]
+    elo2_all = elo_ratings_all[player2]
     if surface == "Clay":
-        elo1_surface = elo1_all[2]
-        elo2_surface = elo2_all[2]
+        elo1_surface = elo_ratings_clay[player1]
+        elo2_surface = elo_ratings_clay[player2]
     elif surface == "Hard":
-        elo1_surface = elo1_all[3]
-        elo2_surface = elo2_all[3]
+        elo1_surface = elo_ratings_hard[player1]
+        elo2_surface = elo_ratings_hard[player2]
     elif surface == "Grass":
-        elo1_surface = elo1_all[1]
-        elo2_surface = elo2_all[1]
+        elo1_surface = elo_ratings_grass[player1]
+        elo2_surface = elo_ratings_grass[player2]
     else:
-        elo1_surface = elo1_all[0]
-        elo2_surface = elo2_all[0]
+        elo1_surface = elo_ratings_all[player1]
+        elo2_surface = elo_ratings_all[player2]
             
     combined_elo1 = weight_all * elo1_all + weight_surface * elo1_surface
     combined_elo2 = weight_all * elo2_all + weight_surface * elo2_surface
