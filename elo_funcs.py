@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sat Aug 17 08:56:08 2024
+Created on Tue Aug 27 15:05:04 2024
 
-@author: kaalvoetranger
+@author: kaalvoetranger@gmail.com
+
+ABOUT: These are mainly helper functions for main.py that don't need data caching
+
 """
 
 #%% dependencies
@@ -24,7 +27,8 @@ g_url2 = 'https://raw.githubusercontent.com/kaalvoetranger-88/st-habibies-bets/m
 matches = pd.read_csv(g_url1)
 players = pd.read_csv(g_url2)
     
-#%% functions for elo calculations
+
+#%%         functions for elo calculations
 
 
 def initialize_elo_ratings():
@@ -72,20 +76,20 @@ def update_elo(winner, loser, elo_dict, K=32):
 def expected_outcome(player1, player2, surface, weight_surface=0.9, h2h_weight=10):
     weight_all = 1 - weight_surface
     
-    elo1_all = elo_ratings_all[player1]
-    elo2_all = elo_ratings_all[player2]
+    elo1_all = elo_df.loc[player1]
+    elo2_all = elo_df.loc[player2]
     if surface == "Clay":
-        elo1_surface = elo_ratings_clay[player1]
-        elo2_surface = elo_ratings_clay[player2]
+        elo1_surface = elo1_all[2]
+        elo2_surface = elo2_all[2]
     elif surface == "Hard":
-        elo1_surface = elo_ratings_hard[player1]
-        elo2_surface = elo_ratings_hard[player2]
+        elo1_surface = elo1_all[3]
+        elo2_surface = elo2_all[3]
     elif surface == "Grass":
-        elo1_surface = elo_ratings_grass[player1]
-        elo2_surface = elo_ratings_grass[player2]
+        elo1_surface = elo1_all[1]
+        elo2_surface = elo2_all[1]
     else:
-        elo1_surface = elo_ratings_all[player1]
-        elo2_surface = elo_ratings_all[player2]
+        elo1_surface = elo1_all[0]
+        elo2_surface = elo2_all[0]
             
     combined_elo1 = weight_all * elo1_all + weight_surface * elo1_surface
     combined_elo2 = weight_all * elo2_all + weight_surface * elo2_surface
@@ -262,79 +266,7 @@ def calculate_and_analyze_elo():
     return elo_df, matches
 
 
-
-#%% functions for tournament simulation
-
-
-def t_simulate_match(player1, player2, elo_df, elo_column='Elo_ALL'):
-    # Check if the DataFrame contains the necessary columns
-    if elo_column not in elo_df.columns:
-        raise ValueError(f"Column '{elo_column}' does not exist in the DataFrame")
-
-    # Fetch Elo ratings using the index
-    elo1 = elo_df.loc[player1, elo_column] if player1 in elo_df.index else 1500
-    elo2 = elo_df.loc[player2, elo_column] if player2 in elo_df.index else 1500
-   
-    # Calculate probability and determine the winner
-    prob_player1_wins = 1 / (1 + 10 ** ((elo2 - elo1) / 400))
-    winner = player1 if 0.5 <= prob_player1_wins else player2
-
-    print(f"Match: {player1} (Elo: {elo1}) vs {player2} (Elo: {elo2})")
-    print(f"Probability {player1} wins: {prob_player1_wins:.2f}")
-    print(f"Winner: {winner}")
-    print('.')
-
-    return winner
-
-
-def simulate_round(draw, elo_df, elo_column='Elo_ALL'):
-    winners = []
-    for i in range(0, len(draw), 2):
-        player1 = draw[i]
-        player2 = draw[i + 1]
-        winner = t_simulate_match(player1, player2, elo_df, elo_column)
-        winners.append(winner)
-        #time.sleep(0.1) for debugging 
-    return winners
-
-
-
-def simulate_tournament(player_list, elo_df, elo_column='Elo_ALL'):
-    round_num = 1
-    current_round = player_list
-    
-    while len(current_round) > 1:
-        print(f"\nSimulating Round {round_num}")
-        winners = simulate_round(current_round, elo_df, elo_column)
-        current_round = winners
-        round_num += 1
-    
-    # Final winner
-    print(f"\nTournament Winner: {current_round[0]}")
-    return current_round[0]
-
-
-
-
-
-#%% testing
-
-"""
-player_list = ["Vasek Pospisil", "Yasutaka Uchiyama", "Sho Shimabukuro",
-    "Alex Bolt","Jo-Wilfried Tsonga","Bradley Holt", "Pablo Andujar", "Tommy Paul",
-    "Kamil Majchrzak","Benjamin Bonzi", "Mikael Torpegaard", "Marc Andrea Huesler",
-    "Nikoloz Basilashvili", "Oscar Otte", "Cameron Norrie", "Adrian Mannarino",
-    "Roger Federer",  "Attila Balazs",  "Fabio Fognini",  "Leandro Riedi",
-    "Francisco Cerundolo", "Antoine Hoang", "Lorenzo Giustino", "Joshua Fonseca",
-    "James Duckworth", "Daniel Evans", "Yuki Bhambri", "Jaume Munar",  "Guido Pella",
-    "Hugo Gaston",  "Christopher Oconnell",  "Constant Lestienne"]
-
-
-simulate_tournament(player_list, elo_df, 'Elo_Clay')
-
-"""
-
-#%% functions for player info.
+#%%         functions for player info
 
 
 
@@ -350,6 +282,7 @@ def player_info_tool(players, matches, elo_df):
         filtered_players = players[players['Player Name'].str.contains(player_name_input, case=False, na="")]
 
         if not filtered_players.empty:
+            print("Dropped Player knowledge on someone...")
             for _, row in filtered_players.iterrows():
                 # Display player details from the `players` DataFrame
                 st.subheader(f"Player: {row['Player Name']}")
@@ -434,12 +367,16 @@ def player_info_tool(players, matches, elo_df):
                 
                 if not recent_matches.empty:
                     # Display recent matches table without the 'info' column
-                    st.write("Recent Matches:")
+                    st.subheader("Recent Matches:")
+                    st.write('20 most recent')
                     match_display = recent_matches.tail(20)
+                    match_display = match_display.copy()
                     match_display['Player_Elo_After'] = match_display['Player_Elo_After'].round(0)
 
-                    st.dataframe(match_display[['tourney_date', 'Tournament', 'surface', 'Round',
-                                                 'winner_name', 'loser_name', 'Scores', 'Player_Rank', 'Player_Elo_After']])
+                    st.dataframe(match_display[['tourney_date', 'Tournament', 'surface', 
+                                                'Round', 'winner_name', 'loser_name', 
+                                                'Scores', 'Player_Rank', 'Player_Elo_After']], 
+                                 hide_index=True)
                     
                     # Plot rankings and Elo rating over time using Plotly
                     fig = go.Figure()
@@ -494,77 +431,82 @@ def player_info_tool(players, matches, elo_df):
     else:
         st.write("Enter a player name to search.")
 
-        
-        
-#%% wiki tests
-"""
-import pandas as pd
-import numpy as np
-import requests
-from bs4 import BeautifulSoup
-players_df = players.head(50)
+  
 
 
 
-    # Function to generate Wikipedia link from Wikidata ID
-def get_wikipedia_link(wikidata_id):
-    if pd.isna(wikidata_id) or not str(wikidata_id).startswith("Q"):
-        return np.nan  # Return NaN if no valid Wikidata ID
-    return f"https://www.wikidata.org/wiki/{wikidata_id}"  # Wikidata URL pattern
+#%%         functions for player comparison
+
+
+
+def calculate_age(dob):
+    if isinstance(dob, np.datetime64):
+        dob = pd.to_datetime(dob).to_pydatetime()
+    elif isinstance(dob, str):
+        dob = datetime.strptime(dob, '%Y-%m-%d')
+    elif isinstance(dob, datetime):
+        pass  # Already a datetime object
+    else:
+        raise TypeError("Date of birth must be a string, numpy.datetime64, or datetime object")
+
+    today = datetime.today()
+    age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    return age
+
+
+# Function to generate a horizontal bar chart for a single player's Elos
+def plot_player_elo(player_info, player_name, position='left'):
+    # Create a DataFrame from the player_info
+    df = pd.DataFrame({
+        'Stat': ['Overall Elo', 'Grass Elo', 'Clay Elo', 'Hard Elo'],
+        'Value': [
+            player_info['elo_all'],
+            player_info['elo_grass'],
+            player_info['elo_clay'],
+            player_info['elo_hard'] 
+                ]
+    })
+
+    # Define bar colors and x-axis position based on the player position
+    bar_color = 'blue' if position == 'left' else 'red'
+  
+    # Create the figure
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        y=df['Stat'],
+        x=df['Value'],
+        orientation='h',
+        marker=dict(color=bar_color),
+        name=player_name
+    ))
+
+    # Update layout based on player position
+    fig.update_layout(
+        title="Current Elo Ratings",
+        xaxis=dict(
+            title='',
+            visible=True,
+            range=[1200, 2800],  # Set x-axis range with max of 2000
+            autorange='reversed' if position == 'left' else True
+        ),
+        yaxis=dict(
+            title='',
+            visible=True if position =='left' else True,
+            side='right' if position == 'right' else 'left'
+        ),
+        showlegend=False)
+    #fig.update_xaxes(range=[1000, 2500])
+    return fig
 
 
 
 
-# Function to generate Wikipedia link from Wikidata ID
-def generate_wikipedia_links(players):
-    # Function to generate Wikipedia link from Wikidata ID
-    def get_wikipedia_link(wikidata_id):
-        if pd.isna(wikidata_id) or not str(wikidata_id).startswith("Q"):
-            return np.nan  # Return NaN if no valid Wikidata ID
-        return f"https://www.wikidata.org/wiki/{wikidata_id}"  # Wikidata URL pattern
 
-    # Create 'Link' column based on valid wikidata_id
-    players['Link'] = players['wikidata_id'].apply(get_wikipedia_link)
-    
-    return players
+#%%         functions for matchmaking
 
 
-
-# Function to fetch the player image from Wikipedia
-def fetch_wikipedia_image(players):
-    def get_image_url(wikipedia_link):
-        if pd.isna(wikipedia_link):
-            return np.nan  # Return NaN if no link is present
-        
-        try:
-            # Fetch the content from the Wikipedia page
-            response = requests.get(wikipedia_link)
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # Find the first <img> tag and get the src attribute
-            img_tag = soup.find('img')
-            if img_tag and 'src' in img_tag.attrs:
-                return "https:" + img_tag['src']  # Append https: to the src path
-
-        except Exception as e:
-            print(f"Error fetching image from {wikipedia_link}: {e}")
-        
-        return np.nan  # Return NaN if no image is found
-
-    # Create 'Image' column with fetched image URLs
-    players['Image'] = players['Link'].apply(get_image_url)
-    
-    return players
-
-
-
-# Example usage
-df_players = process_player_data(players_df)  # Process names and DOBs
-df_players = generate_wikipedia_links(df_players)  # Add Wikipedia Links
-df_players = fetch_wikipedia_image(df_players)  # Fetch and add Image URLs
-
-"""
-#%% functions for odds converter/calculator
+#%%         functions for odds converter/calculator
 
 
 def decimal_to_fractional(decimal_odds):
@@ -613,7 +555,60 @@ def implied_probability(decimal_odds):
 
 
 
-#%%
+
+
+#%%         functions for tournament simulation
+
+
+
+def t_simulate_match(player1, player2, elo_df, elo_column='Elo_ALL'):
+    # Check if the DataFrame contains the necessary columns
+    if elo_column not in elo_df.columns:
+        raise ValueError(f"Column '{elo_column}' does not exist in the DataFrame")
+
+    # Fetch Elo ratings using the index
+    elo1 = elo_df.loc[player1, elo_column] if player1 in elo_df.index else 1500
+    elo2 = elo_df.loc[player2, elo_column] if player2 in elo_df.index else 1500
+   
+    # Calculate probability and determine the winner
+    prob_player1_wins = 1 / (1 + 10 ** ((elo2 - elo1) / 400))
+    winner = player1 if 0.5 <= prob_player1_wins else player2
+
+    print(f"Match: {player1} (Elo: {elo1}) vs {player2} (Elo: {elo2})")
+    print(f"Probability {player1} wins: {prob_player1_wins:.2f}")
+    print(f"Winner: {winner}")
+    print('.')
+
+    return winner
+
+
+def simulate_round(draw, elo_df, elo_column='Elo_ALL'):
+    winners = []
+    for i in range(0, len(draw), 2):
+        player1 = draw[i]
+        player2 = draw[i + 1]
+        winner = t_simulate_match(player1, player2, elo_df, elo_column)
+        winners.append(winner)
+        #time.sleep(0.1) for debugging 
+    return winners
+
+
+
+def simulate_tournament(player_list, elo_df, elo_column='Elo_ALL'):
+    round_num = 1
+    current_round = player_list
+    
+    while len(current_round) > 1:
+        print(f"\nSimulating Round {round_num}")
+        winners = simulate_round(current_round, elo_df, elo_column)
+        current_round = winners
+        round_num += 1
+    
+    # Final winner
+    print(f"\nTournament Winner: {current_round[0]}")
+    return current_round[0]
+
+
 
 
 
