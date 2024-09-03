@@ -505,6 +505,26 @@ def plot_player_elo(player_info, player_name, position='left'):
 #%%         functions for matchmaking
 
 
+def calculate_ev(expected_prob, odds, stake):
+    # Calculate the implied probability from the bookmaker's odds
+    implied_prob = 1 / odds
+    
+    # Calculate potential profit (odds - 1) * stake
+    profit = (odds - 1) * stake
+    
+    # Calculate EV
+    ev = (expected_prob * profit) - ((1 - expected_prob) * stake)
+    
+    return ev
+
+
+# Function to calculate Vigor (Vig)
+def calculate_vig(implied_prob_1, implied_prob_2):
+    total_implied_prob = implied_prob_1 + implied_prob_2
+    vig = total_implied_prob - 1
+    return vig
+
+
 #%%         functions for odds converter/calculator
 
 
