@@ -40,6 +40,7 @@ from elo_funcs import calculate_and_analyze_elo, simulate_match, t_simulate_matc
 from elo_funcs import decimal_to_fractional, decimal_to_american, fractional_to_decimal, fractional_to_american
 from elo_funcs import american_to_decimal, american_to_fractional, calculate_payout, implied_probability
 from elo_funcs import calculate_age, plot_player_elo
+from elo_funcs import calculate_ev, calculate_vig
 
 import warnings
 # Ignore specific types of warnings
@@ -239,11 +240,62 @@ def expected_out(player1, player2, surface, matches=matches, weight_surface=0.9,
     return expected_probA, expected_probS, expected_probH
 
 
+def live_match_maker(player_1, player_2, surface, model, odds_1, odds_2, stake=100):
+    """
+    Calculate the Expected Value (EV) for betting on a tennis match between two players,
+    using different Elo models, and provide a decision on whether to place a bet.
+
+    Parameters:
+    -----------
+    player_1 : str Name of Player 1.
+    player_2 : str Name of Player 2.
+    surface : str The surface type ('Hard', 'Clay', 'Grass').
+    model : int The model to use for probability calculation:
+                0 - Overall Elo, 1 - Surface-specific Elo, 2 - Head-to-Head Elo
+    odds_1 : float The bookmaker's odds for Player 1. 
+    odds_2 : float The bookmaker's odds for Player 2.
+    stake : float, optional: The amount to be staked on the bet. Default is R100
+
+    Returns:
+    --------
+    None
+        Prints the Expected Value (EV) for both players and a recommendation
+        on whether betting on each player has a positive or negative expected value.
+    """
+    # Calculate the expected probability of Player 1 winning
+    prob_1 = expected_out(player_1, player_2, surface=surface)[model]
+    
+    # Player 2's probability is the complement of Player 1's probability
+    prob_2 = 1 - prob_1
+    
+    # Calculate EV for Player 1 and Player 2
+    ev_1 = calculate_ev(prob_1, odds_1, stake)
+    ev_2 = calculate_ev(prob_2, odds_2, stake)
+    
+    # Display the results
+    print(f"Expected Value for betting on {player_1}: R{ev_1:.2f}")
+    print(f"Expected Value for betting on {player_2}: R{ev_2:.2f}")
+    
+    # Decision-making
+    if ev_1 > 0:
+        print(f"Betting on {player_1} has a positive expected value.")
+    else:
+        print(f"Betting on {player_1} has a negative expected value.")
+    
+    if ev_2 > 0:
+        print(f"Betting on {player_2} has a positive expected value.")
+    else:
+        print(f"Betting on {player_2} has a negative expected value.")
+    
+    return ev_1, ev_2
+
+
+
 #%% 3 layout
 
 
 # Sidebar for navigation 
-st.sidebar.code("Build: 0.9        2024-08-27")
+st.sidebar.code("Build: 1.0        2024-09-03")
 st.sidebar.code(f"Most Recent Match = {max_d}")
 st.sidebar.divider()
 st.sidebar.image('logo.png', width=300)
@@ -272,7 +324,6 @@ st.markdown(f"""
 
 
 #%% 4 main content and tools
-
 
 # Main content based on the selected tool
 # player info tool
@@ -436,10 +487,65 @@ elif tool == "Player Comparison":
             st.write("placeholder", "")
             st.write("More stuff coming soon")
 
+# Match Maker Tool
 elif tool == "Match Maker":
     st.header("Match Maker Tool")
-    st.write("This tool predicts the outcome of a match.")
-    # Placeholder for match prediction inputs and output
+    st.write("This tool predicts the outcome of a match and provides the Expected Value (EV) for betting.")
+
+    # Inputs for the Match Maker Tool
+    player_1 = st.text_input("Enter the name of Player 1")
+    player_2 = st.text_input("Enter the name of Player 2")
+
+    surface = st.selectbox("Select the court Surface", ["Hard", "Clay", "Grass"])
+
+    model = st.radio("Select the **Elo Model** to use", 
+                     [("Overall (A)", 0), 
+                      ("Surface-Specific (S)", 1), 
+                      ("Head-to-Head (H)", 2)], 
+                     format_func=lambda x: x[0])
+
+    odds_1 = st.number_input("Enter the bookmaker's odds for Player 1", min_value=1.01, value=2.00, step=0.01)
+    odds_2 = st.number_input("Enter the bookmaker's odds for Player 2", min_value=1.01, value=2.00, step=0.01)
+
+    stake = st.number_input("Enter the stake amount", min_value=1, value=100, step=1)
+
+    # Button to calculate the outcome
+    if st.button("Calculate Expected Value"):
+        if player_1 and player_2:
+            st.write(f"Calculating the match outcome between {player_1} and {player_2} on {surface} surface using {model[0]} model.")
+            st.write("NB: This EV Framework is still being backtested and has not been calibrated!")
+            # Calculate the expected probability of Player 1 winning using the selected model
+            prob_1 = expected_out(player_1, player_2, surface=surface)[model[1]]
+            
+            # Calculate the implied probabilities from the bookmaker's odds
+            implied_prob_1 = 1 / odds_1
+            implied_prob_2 = 1 / odds_2
+            vig = calculate_vig(implied_prob_1, implied_prob_2)
+
+            # Run the Match Maker Tool to calculate EV
+            ev_1, ev_2 = live_match_maker(player_1, player_2, surface, model[1], odds_1, odds_2, stake)
+            
+            # Display the results
+            st.write(f"**{player_1} EV:** R{ev_1:.2f}")
+            st.write(f"Our Model gives them a {prob_1:.1%} chance to win while the bookies say {implied_prob_1:.1%}")
+ 
+            st.write(f"**{player_2} EV:** R{ev_2:.2f}")
+            st.write(f"Our Model gives them a {1 - prob_1:.1%} chance to win while the bookies say {implied_prob_2:.1%}")
+
+            # Display Vigor
+            st.write(f"**Bookmaker's Vigor:** {vig:.1%}")            
+            # Display decision-making
+            if ev_1 > 0:
+                st.success(f"Betting on {player_1} has a positive EV")
+            else:
+                st.error(f"Betting on {player_1} has a negative EV")
+            
+            if ev_2 > 0:
+                st.success(f"Betting on {player_2} has a positive EV")
+            else:
+                st.error(f"Betting on {player_2} has a negative EV")
+        else:
+            st.warning("Please enter both player names.")
 
 elif tool == "Odds Converter":
     st.title("Odds Converter")
