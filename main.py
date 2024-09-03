@@ -241,27 +241,6 @@ def expected_out(player1, player2, surface, matches=matches, weight_surface=0.9,
 
 
 def live_match_maker(player_1, player_2, surface, model, odds_1, odds_2, stake=100):
-    """
-    Calculate the Expected Value (EV) for betting on a tennis match between two players,
-    using different Elo models, and provide a decision on whether to place a bet.
-
-    Parameters:
-    -----------
-    player_1 : str Name of Player 1.
-    player_2 : str Name of Player 2.
-    surface : str The surface type ('Hard', 'Clay', 'Grass').
-    model : int The model to use for probability calculation:
-                0 - Overall Elo, 1 - Surface-specific Elo, 2 - Head-to-Head Elo
-    odds_1 : float The bookmaker's odds for Player 1. 
-    odds_2 : float The bookmaker's odds for Player 2.
-    stake : float, optional: The amount to be staked on the bet. Default is R100
-
-    Returns:
-    --------
-    None
-        Prints the Expected Value (EV) for both players and a recommendation
-        on whether betting on each player has a positive or negative expected value.
-    """
     # Calculate the expected probability of Player 1 winning
     prob_1 = expected_out(player_1, player_2, surface=surface)[model]
     
