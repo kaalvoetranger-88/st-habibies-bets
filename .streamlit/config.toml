@@ -1,0 +1,25 @@
+[theme]
+
+# The preset Streamlit theme that your custom theme inherits from.
+# One of "light" or "dark".
+# The value below was set in /Users/kaalvoetranger/Desktop/tennis_app/.streamlit/config.toml
+base = "dark"
+
+# Primary accent color for interactive elements.
+# The value below was set in /Users/kaalvoetranger/Desktop/tennis_app/.streamlit/config.toml
+primaryColor = "#a4e8e0"
+
+# Background color for the main content area.
+# The value below was set in /Users/kaalvoetranger/Desktop/tennis_app/.streamlit/config.toml
+backgroundColor = "#244843"
+
+# Background color used for the sidebar and most interactive widgets.
+# The value below was set in /Users/kaalvoetranger/Desktop/tennis_app/.streamlit/config.toml
+secondaryBackgroundColor = "#539A64"
+
+# Color used for almost all text.
+# textColor =
+
+# Font family for all text in the app, except code blocks. One of "sans serif",
+# "serif", or "monospace".
+# font =
