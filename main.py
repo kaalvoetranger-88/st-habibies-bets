@@ -151,8 +151,8 @@ def load_data():
         and the error is shown on the Streamlit app.
     """
     try:
-        matches = pd.read_csv(os.path.join(data_dir, "matches.csv"))
-        players = pd.read_csv(os.path.join(data_dir, "atp_players.csv"))
+        matches = pd.read_csv(g_url1))
+        players = pd.read_csv(g_url2))
         players['Player Name'] = players['name_first'] + ' ' + players['name_last']
         players['dob'] = players['dob'].astype(str)
         players['dob'] = pd.to_datetime(players['dob'].str[:8], format='%Y%m%d', errors='coerce')
