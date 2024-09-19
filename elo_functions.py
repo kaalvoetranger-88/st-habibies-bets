@@ -6,24 +6,21 @@ import pandas as pd
 import numpy as np
 import os
 import plotly.graph_objs as go
-from datetime import datetime 
+from datetime import datetime
 import streamlit as st
-
 import warnings
 # Ignore specific types of warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Set directories and ignore warnings (edit this sections when deploying)
-base_dir = os.path.expanduser("~/Desktop/tennis_app/")
-data_dir = os.path.join(base_dir, "datasets/")
-os.makedirs(base_dir, exist_ok=True)
-os.makedirs(data_dir, exist_ok=True)
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
+#%% local variables (these are generated in main.py)
+app_dir = os.getcwd()
+data_dir = os.path.expanduser("~app_dir/datasets/")
+g_url1 = 'https://raw.githubusercontent.com/kaalvoetranger-88/st-habibies-bets/main/datasets/matches.csv'
+g_url2 = 'https://raw.githubusercontent.com/kaalvoetranger-88/st-habibies-bets/main/datasets/atp_players.csv'
+matches = pd.read_csv(g_url1)
+players = pd.read_csv(g_url2)
 
-matches = pd.read_csv(data_dir + "matches.csv")
-players = pd.read_csv(data_dir + "atp_players.csv")
 matches['tourney_date'] = pd.to_datetime(matches['tourney_date'])
 
 # %% 2 elo functions
