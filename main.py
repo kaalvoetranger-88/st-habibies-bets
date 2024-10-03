@@ -97,17 +97,14 @@ os.makedirs(app_dir, exist_ok=True)
 os.makedirs(data_dir, exist_ok=True)
 os.chdir(app_dir)
 os.getcwd()
-g_url1 = 'https://raw.githubusercontent.com/kaalvoetranger-88/st-habibies-bets/main/datasets/matches.csv'
-g_url2 = 'https://raw.githubusercontent.com/kaalvoetranger-88/st-habibies-bets/main/datasets/atp_players.csv'
+g_url1 = 'https://raw.githubusercontent.com/kaalvoetranger-88/st-habibies-bets/main/datasets/matches_v1.csv'
+g_url2 = 'https://raw.githubusercontent.com/kaalvoetranger-88/st-habibies-bets/main/datasets/atp_players_v1.csv'
 c_url = 'https://raw.githubusercontent.com/kaalvoetranger-88/st-habibies-bets/main/construction.jpg'
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# import custom Elo functions
-from elo_functions import (initialize_elo_ratings, update_elo,
-                           expected_outcome, update_head_to_head, get_rating,
-                           simulate_match, print_elo_ratings,
-                           calculate_and_analyze_elo)
+# import custom Elo and glicko functions
+from functions import EloFunctions, GlickoFunctions
 
 # set wide layout
 st.set_page_config(layout="wide")
@@ -118,51 +115,14 @@ logger = logging.getLogger(__name__)
 
 # %% 2 data loading and caching
 
-
-# Load data from source
 @st.cache_data
 def load_data():
-    """
-    Loads match and player data from CSV files, performs initial data cleaning,
-    and returns the matches and players DataFrames.
-
-    Reads the following CSV files from the specified `data_dir`:
-    - "matches.csv" for match data.
-    - "atp_players.csv" for player data.
-
-    Key operations performed:
-    - Adds a 'Player Name' column in the players DataFrame by concatenating
-      'name_first' and 'name_last'.
-    - Converts the 'dob' (date of birth) column to a datetime format.
-    - Converts the 'tourney_date' column to a datetime format.
-    - Logs the data loading and structure information.
-
-    Returns:
-        tuple: A tuple containing:
-            - matches (pd.DataFrame): The loaded match data.
-            - players (pd.DataFrame): The loaded player data.
-
-    Raises:
-        FileNotFoundError: If any of the specified files are not found
-        an error is logged, and the function halts the execution.
-
-    Notes:
-        The function will stop execution if there is a FileNotFoundError,
-        and the error is shown on the Streamlit app.
-    """
     try:
         matches = pd.read_csv(g_url1)
         players = pd.read_csv(g_url2)
-        players['Player Name'] = players['name_first'] + ' ' + players['name_last']
-        players['dob'] = players['dob'].astype(str)
-        players['dob'] = pd.to_datetime(players['dob'].str[:8], format='%Y%m%d', errors='coerce')
-        today = datetime.today() 
-        players['age'] = ((today - players['dob']).dt.days // 365)
-        # convert tournament date to datetime64 dtype
-        matches['tourney_date'] = pd.to_datetime(matches['tourney_date'])
+        players['dob'] = pd.to_datetime(players['dob'], errors='coerce')
+        matches['Date'] = pd.to_datetime(matches['Date'])
         logger.info("Data loaded successfully.")
-        logger.info(f'{matches.info()}')
-        logger.info(f'{players.info()}')
         return matches, players
     except FileNotFoundError as e:
         logger.error(f"File not found: {e}")
@@ -170,89 +130,122 @@ def load_data():
         st.stop()
 
 
-# Initialize data
 @st.cache_data
 def initialize_data():
-    """
-    Initializes and loads the tennis match and player data, returning
-    the datasets and the most recent tournament date.
-
-    The function:
-    - Loads match and player data using the `load_data` function.
-    - Finds the most recent tournament date (`max_d`) from the 'tourney_date'
-      column in the matches DataFrame.
-
-    The data is cached to improve performance when using Streamlit.
-
-    Returns:
-        tuple: A tuple containing:
-            - matches (pd.DataFrame): Match data.
-            - players (pd.DataFrame): Player data.
-            - max_d (datetime.date): Most recent tournament date in the matches
-    """
     matches, players = load_data()
-    max_d = matches['tourney_date'].dt.date.max()
+    max_d = matches['Date'].dt.date.max()
     return matches, players, max_d
 
 
-matches, players, max_d = initialize_data()
+# Initialize the data in session state
+if 'matches' not in st.session_state or 'players' not in st.session_state:
+    st.session_state.matches, st.session_state.players, st.session_state.max_d = initialize_data()
 
 
-# Cache the main calculation function output
 @st.cache_data
 def get_elo_and_matches():
-    """
-    Calculates Elo ratings and updates match data, returning both the Elo
-    ratings DataFrame and the match data using calculate_and_analyze_elo()
-
-    Returns:
-        tuple: A tuple containing:
-            - elo_df (pd.DataFrame): Calculated Elo ratings DataFrame.
-            - matches (pd.DataFrame): Match data with associated statistics
-
-    Logs:
-        Logs success messages and DataFrame information for debugging purposes.
-    """
-    elo_df, matches = calculate_and_analyze_elo()
-    logger.info('Initialization success...')
-    logger.info(f'{matches.info()}')
-    logger.info(f'{elo_df.info()}')
-    return elo_df, matches
+    elo_functions = EloFunctions(players=st.session_state.players, matches=st.session_state.matches, K=32)
+    elo_df, matches_elo = elo_functions.calculate_and_analyze_elo()
+    logger.info("Elo Calculations completed")
+    return elo_df, matches_elo
 
 
-# for local debugging uncomment the below line
-# elo_df, matches = get_elo_and_matches()
+@st.cache_data
+def get_glicko_and_matches():
+    glicko_functions = GlickoFunctions(players=st.session_state.players, 
+                                       matches=st.session_state.matches,
+                                       K=12, c=60, decay=0.875)
+    glicko_df, matches_glicko = glicko_functions.calculate_and_analyze_glicko(K=12, 
+                              H=25, decay=0.85, c=60, DELTA=timedelta(weeks=3))
+    logger.info("Glicko Calculations completed")
+    return glicko_df, matches_glicko
 
-# Run model calculations once and store results in session state
-if 'elo_df' not in st.session_state or 'matches' not in st.session_state:
-    st.session_state.elo_df, st.session_state.matches = get_elo_and_matches()
 
+# Function to handle the rating system toggle
+def set_rating_system():
+    if st.session_state.rating_system == 'Elo':
+        st.session_state.matches = st.session_state.matches_elo
+    else:
+        st.session_state.matches = st.session_state.matches_glicko
+
+
+# Cache Elo and Glicko data in session state
+if 'elo_df' not in st.session_state or 'matches_elo' not in st.session_state:
+    st.session_state.elo_df, st.session_state.matches_elo = get_elo_and_matches()
+
+if 'glicko_df' not in st.session_state or 'matches_glicko' not in st.session_state:
+    st.session_state.glicko_df, st.session_state.matches_glicko = get_glicko_and_matches()
+
+# Initialize rating system in session state if not already present
+if 'rating_system' not in st.session_state:
+    st.session_state.rating_system = 'Elo'  # Default to Elo
+
+# for local debugging uncomment the below lines
+
+#matches, players, max_d = initialize_data()
+#elo_functions = EloFunctions(players=players, matches=matches, K=32)
+#elo_df, matches_elo = elo_functions.calculate_and_analyze_elo()
+#glicko_functions = GlickoFunctions(players=players, matches=matches,
+#                                   K=23, c=60, decay=0.875)
+#glicko_df, matches_glicko = glicko_functions.calculate_and_analyze_glicko(K=24,
+#                            H=25, decay=0.825, c=65, DELTA=timedelta(weeks=2))
+
+players = st.session_state.players
 elo_df = st.session_state.elo_df
+glicko_df = st.session_state.glicko_df
+matches_elo = st.session_state.matches_elo
+matches_glicko = st.session_state.matches_glicko
+max_d = st.session_state.max_d 
 matches = st.session_state.matches
-
 # %% 3 layout
 
-# Sidebar for navigation
-st.sidebar.code("Build: 1.1*         2024-09-20")
-st.sidebar.code(f"Most Recent Match = {max_d}")
+# CSS styling for Custom Header elements
+st.markdown(
+    """
+    <style>
+    .custom-header {
+        background-color: #ecf83c; /* Custom background color */
+        padding: 15px;
+        border-radius: 10px;
+        text-align: center;
+        color: white;
+        font-size: 16px;
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+    .custom-link {
+        color: #A4E8E0;  /* Custom link color */
+        text-decoration: none;
+        font-weight: normal;
+    }
+    .custom-link:hover {
+        text-decoration: underline;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True)
 
-st.sidebar.divider()
-# App Logo
-st.sidebar.image('logo.png', width=300)
+# CSS styling for different sections
+st.markdown(
+    """
+    <style>
+    .section1 {
+        background-color: #f33324; /* Light blue */
+        padding: 20px;             /* Padding inside the section */
+        border-radius: 10px;       /* Rounded corners */
+        margin-bottom: 20px;       /* Space between sections */
+    }
+    
+    .section2 {
+        background-color: #4cd7d0; /* Blanched almond */
+        padding: 20px;             /* Padding inside the section */
+        border-radius: 10px;       /* Rounded corners */
+    }
+    </style>
+    """,
+    unsafe_allow_html=True)
 
-# Radio and Buttons to select Tool
-st.sidebar.subheader('Choose a tool:')
-tool = st.sidebar.radio("Choose a tool:",
-                        ("Player Info", "Player Comparison",
-                         "Match Maker", "Odds Converter",
-                         "Tournament Simulator", "Strategy Simulator"),
-                        label_visibility='hidden')
-st.sidebar.divider()
-
-# About section that populates below the active tool.
-about = st.sidebar.button("🎾 About")
-
-# Dictionary with color hex values
+# HEX color values for App
 colors = {
     'primary': '#A4E8E0',
     'secondary': '#ff7f0e',
@@ -273,6 +266,70 @@ colors = {
     'line1a': '#80b672',
     'line2a': '#044cac'}
 
+# Define header with custom styling
+def header():
+    col1, col2, col3 = st.columns([1, 2, 2])
+
+    with col1:
+        # Toggle switch for Elo or Glicko
+        rating_system = st.radio(
+            "Rating System", 
+            options=['Elo', 'Glicko'], 
+            index=0 if st.session_state.rating_system == 'Elo' else 1,
+            key='rating_system', horizontal=True)
+        
+        # Trigger the change in the rating system
+        set_rating_system()
+
+    with col2:
+        st.markdown(
+            '<div class="custom-header">'
+            '<a class="custom-link" href="https://www.atptour.com/en/scores/current">ATP This Week</a> | '
+            '<a class="custom-link" href="https://www.atptour.com/en/tournaments/shanghai/5014/overview">Rolex Masters Focus</a>'
+            '</div>', 
+            unsafe_allow_html=True)
+
+    with col3:
+        st.markdown(
+            '<div class="custom-header">'
+            '<a class="custom-link" href="https://www.oddstrader.com/atp/">Odds Trader</a> | '
+            '<a class="custom-link" href="https://www.bet.co.za/">BET.co.za</a>'
+            '</div>', 
+            unsafe_allow_html=True)
+    #st.divider()
+
+
+# App Header
+with st.container(border=True):
+    header()
+#    st.dataframe(st.session_state.matches.iloc[:, [2, 3, 4, 9, 40, 41, 42]].tail(),
+#                 hide_index=True)
+#    st.write("remove this table before deployment")
+
+# Sidebar for navigation
+st.sidebar.code("Build: 1.2*         2024-10-04")
+st.sidebar.code(f"Most Recent Match = {max_d}")
+
+st.sidebar.divider()
+# App Logo
+st.sidebar.image('logo.png', width=300)
+
+# Radio and Buttons to select Tool
+st.sidebar.subheader('Choose a tool:')
+tool = st.sidebar.radio("Choose a tool:",
+                        ("Player Info", "Player Comparison",
+                         "Match Maker", "Odds Converter",
+                         "Tournament Simulator", "Strategy Simulator"),
+                        label_visibility='hidden')
+st.sidebar.divider()
+
+# About section that populates below the active tool.
+about = st.sidebar.button("🎾 About")
+
+
+# %% modules
+
+
 # %% 4 modules
 
 def validate_player_name(elo_df):
@@ -288,7 +345,8 @@ def validate_player_name(elo_df):
         - Displays a success message if the name is valid, or an error message if it is not.
     """
     # Input for player name
-    player_name = st.text_input("Enter player's name:")
+    player_name = st.selectbox("Select a player's name:", 
+                               st.session_state.players['Player Name'].unique())
     
     if player_name:
         if player_name in elo_df.index:
@@ -333,6 +391,7 @@ def gauge_chart(win_percentage, fig_width=350, fig_height=350, title="Win Percen
     st.plotly_chart(fig)
 
 
+# depreciated from build 1.2* onwards
 def fetch_wikipedia_info(player_name):
     """
     Fetch the first paragraph and photo URL of a Wikipedia page for a given tennis player.
@@ -420,17 +479,23 @@ def calculate_win_percentage(player_matches, bin_type, player_name):
         bin_column_winner = 'WRank'
         bin_column_loser = 'LRank'
         opponent_bin_column = 'LRank'  # Opponent's ranking
-    elif bin_type == 'Rating':
+    elif bin_type == 'Rating' and st.session_state.matches is matches_elo:
         bins = [float('-inf'), 1500, 1599, 1699, 1799, float('inf')]
         labels = ['E <1500', 'D 1500-1599', 'C 1600-1699', 'B 1700-1799', 'A 1800+']
         bin_column_winner = 'elo_winner_before'
         bin_column_loser = 'elo_loser_before'
         opponent_bin_column = 'elo_loser_before'  # Opponent's rating
+    elif bin_type == 'Rating' and st.session_state.matches is matches_glicko:
+        bins = [float('-inf'), 1500, 1599, 1699, 1799, float('inf')]
+        labels = ['E <1500', 'D 1500-1599', 'C 1600-1699', 'B 1700-1799', 'A 1800+']
+        bin_column_winner = 'r_winner_before'
+        bin_column_loser = 'r_loser_before'
+        opponent_bin_column = 'r_loser_before'  # Opponent's rating
 
     # Bin the data for opponents based on their ranking or rating
     player_matches['Bin'] = pd.cut(
         player_matches.apply(
-            lambda row: row[bin_column_loser] if row['winner_name'] == player_name else row[bin_column_winner],
+            lambda row: row[bin_column_loser] if row['Winner'] == player_name else row[bin_column_winner],
             axis=1
         ),
         bins=bins,
@@ -439,7 +504,7 @@ def calculate_win_percentage(player_matches, bin_type, player_name):
     )
     
     # Calculate win counts and total counts per bin
-    win_counts = player_matches[player_matches['winner_name'] == player_name].groupby('Bin').size().reindex(labels, fill_value=0)
+    win_counts = player_matches[player_matches['Winner'] == player_name].groupby('Bin').size().reindex(labels, fill_value=0)
     total_counts = player_matches.groupby('Bin').size().reindex(labels, fill_value=0)
     
     # Calculate win percentages
@@ -457,8 +522,9 @@ def calculate_win_percentage(player_matches, bin_type, player_name):
 
 
 @st.cache_data
-def get_player_info(player_input, players, elo_df):
+def get_player_info(player_input, players, elo_df, glicko_df):
     player_info = elo_df.loc[elo_df.index.str.contains(player_input, case=False)].copy()
+    player_info2 = glicko_df.loc[glicko_df.index.str.contains(player_input, case=False)].copy()
     if not player_info.empty:
         player_name = player_info.index[0]
         players_index = players['Player Name'].str.strip().str.lower()
@@ -473,7 +539,9 @@ def get_player_info(player_input, players, elo_df):
                 "elo_hard": player_info['Elo_Hard'].values[0],
                 "win_percentage": f"{player_info['Win_Percentage'].values[0]:.1f}",
                 "Ranking": player_info['Most_Recent_Ranking'].values[0],
-                "Ranking_Date": player_info['Most_Recent_Date'].dt.date.values[0]
+                "glicko_r": player_info2['R_value'].values[0],
+                "glicko_rd": player_info2['RD_value'].values[0],
+                "Ranking_Date": player_info['Most_Recent_Date'].dt.date.values[0]                
             }
         else:
             st.error(f"Player '{player_name}' not found in the players DataFrame.")
@@ -483,63 +551,74 @@ def get_player_info(player_input, players, elo_df):
         return None
 
 
-def prepare_ranking_and_elo_graph(player_name, matches):
+def prepare_ranking_rating_graph(player_name, matches_elo, matches_glicko):
     # Ensure that the DataFrame has the necessary columns
-    required_columns = ['winner_name', 'loser_name', 'WRank', 'LRank', 'elo_winner_after', 'elo_loser_after', 'tourney_date']
-    if all(col in matches.columns for col in required_columns):
+    required_columns_e = ['Winner', 'Loser', 'WRank', 'LRank', 
+                          'elo_winner_after', 'elo_loser_after', 'Date']
+    required_columns_g = ['Winner', 'Loser', 'WRank', 'LRank', 
+                          'r_winner_after', 'r_loser_after', 'Date']
+    if all(col in matches_elo.columns for col in required_columns_e):
         # Filter rows where the player is either a winner or a loser
-        player_matches = matches[
-            (matches['winner_name'].str.contains(player_name, case=False, na=False)) |
-            (matches['loser_name'].str.contains(player_name, case=False, na=False))
+        player_matches_elo = matches_elo[
+            (matches_elo['Winner'].str.contains(player_name, case=False, na=False)) |
+            (matches_elo['Loser'].str.contains(player_name, case=False, na=False))
         ].copy()
-        
+    if all(col in matches_glicko.columns for col in required_columns_g):
+        # Filter rows where the player is either a winner or a loser
+        player_matches_glicko = matches_glicko[
+            (matches_glicko['Winner'].str.contains(player_name, case=False, na=False)) |
+            (matches_glicko['Loser'].str.contains(player_name, case=False, na=False))
+        ].copy()    
         # Create lists to store ranking and Elo rating data
         rankings = []
         elo_ratings = []
+        glicko_ratings = []
         dates = []  # store dates dynamically for plotting
         
         # Determine if player is in the winner or loser column and get the relevant data
-        for index, row in player_matches.iterrows():
-            if player_name.lower() in row['winner_name'].lower():
+        for index, row in player_matches_elo.iterrows():
+            if player_name.lower() in row['Winner'].lower():
                 rankings.append(row['WRank'])
                 elo_ratings.append(row['elo_winner_after'])
             else:
                 rankings.append(row['LRank'])
                 elo_ratings.append(row['elo_loser_after'])
             
-            dates.append(row['tourney_date'])
-        
+            dates.append(row['Date'])
+        for index, row in player_matches_glicko.iterrows():
+            if player_name.lower() in row['Winner'].lower():
+                glicko_ratings.append(row['r_winner_after'])
+            else:
+                glicko_ratings.append(row['r_loser_after'])    
         # Create a DataFrame for the graph
         graph_data = pd.DataFrame({
-            'tourney_date': dates,
+            'Date': dates,
             'Player_Rank': rankings,
-            'Player_Elo_After': elo_ratings
+            'Player_Elo_After': elo_ratings,
+            'Player_Glicko_After': glicko_ratings
         })
-        print('Ranking and Elo info updated in cache')
+        print('Ranking and Rating info updated in cache')
         return graph_data
     
     else:
-        st.write("One or more required columns are missing in the matches DataFrame.")
+        st.write("One or more required columns are missing in the matches DataFrames.")
         return pd.DataFrame()  # Return an empty DataFrame or handle the error appropriately
-
-
-
 
 
 def calculate_head_to_head(player_1, player_2, matches):
     h2h_record = None
     # Filter matches where either player 1 or player 2 is involved
     h2h_matches = matches[
-        ((matches['winner_name'].str.contains(player_1, case=False)) & 
-         (matches['loser_name'].str.contains(player_2, case=False))) |
-        ((matches['winner_name'].str.contains(player_2, case=False)) & 
-         (matches['loser_name'].str.contains(player_1, case=False)))
+        ((matches['Winner'].str.contains(player_1, case=False)) & 
+         (matches['Loser'].str.contains(player_2, case=False))) |
+        ((matches['Winner'].str.contains(player_2, case=False)) & 
+         (matches['Loser'].str.contains(player_1, case=False)))
     ]
     
     if isinstance(h2h_matches, pd.DataFrame) and not h2h_matches.empty:
         # Count wins for player 1 and player 2
-        player_1_wins = len(h2h_matches[h2h_matches['winner_name'].str.contains(player_1, case=False)])
-        player_2_wins = len(h2h_matches[h2h_matches['winner_name'].str.contains(player_2, case=False)])
+        player_1_wins = len(h2h_matches[h2h_matches['Winner'].str.contains(player_1, case=False)])
+        player_2_wins = len(h2h_matches[h2h_matches['Winner'].str.contains(player_2, case=False)])
         
         # Handle edge case where there are no losses (to avoid division by zero)
         if player_2_wins > 0:
@@ -550,16 +629,16 @@ def calculate_head_to_head(player_1, player_2, matches):
         logger.info(f"H2H info updated in cache: {h2h_record} (as float)")
         
         # Return both the head-to-head record and the match info DataFrame
-        return h2h_record, h2h_matches[['tourney_date', 'Tournament', 'surface', 'Round',
-                                        'winner_name', 'loser_name', 'Scores']]
+        return h2h_record, h2h_matches[['Date', 'Tournament', 'Surface', 'Round',
+                                        'Winner', 'Loser', 'Scores']]
     else:
         return 1.0, pd.DataFrame()  # Return default values if no matches are found
 
 
 def head_to_head_summary(player1, player2, matches):
     # Count wins for each player
-    player1_wins = matches[matches['winner_name'] == player1].shape[0]
-    player2_wins = matches[matches['winner_name'] == player2].shape[0]
+    player1_wins = matches[matches['Winner'] == player1].shape[0]
+    player2_wins = matches[matches['Winner'] == player2].shape[0]
 
     # Head-to-head summary
     if player1_wins > player2_wins:
@@ -571,23 +650,23 @@ def head_to_head_summary(player1, player2, matches):
 
     # Find most recent match
     recent_match = matches[
-        ((matches['winner_name'] == player1) & (matches['loser_name'] == player2)) | 
-        ((matches['winner_name'] == player2) & (matches['loser_name'] == player1))
-    ].sort_values(by='tourney_date', ascending=False).iloc[0]
+        ((matches['Winner'] == player1) & (matches['Loser'] == player2)) | 
+        ((matches['Winner'] == player2) & (matches['Loser'] == player1))
+    ].sort_values(by='Date', ascending=False).iloc[0]
 
-    recent_winner = recent_match['winner_name']
-    recent_loser = recent_match['loser_name']
+    recent_winner = recent_match['Winner']
+    recent_loser = recent_match['Loser']
     recent_score = recent_match['Scores']
-    recent_date = pd.to_datetime(recent_match['tourney_date'], format='%Y%m%d').strftime('%B %d, %Y')
+    recent_date = pd.to_datetime(recent_match['Date'], format='%Y%m%d').strftime('%B %d, %Y')
 
     recent_match_summary = f"The most recent match was won by {recent_winner} with a score of :green-background[{recent_score}] on {recent_date}."
 
     return h2h_summary, recent_match_summary
 
 
-def expected_out(player1, player2, surface, matches=matches, weight_surface=0.9, h2h_weight=15):
+def expected_out(player1, player2, Surface, matches=matches, weight_Surface=0.9, h2h_weight=15):
     """
-    Calculate the expected outcome probabilities between two players based on Elo ratings, surface-specific adjustments, and head-to-head record.
+    Calculate the expected outcome probabilities between two players based on Elo ratings, Surface-specific adjustments, and head-to-head record.
 
     Parameters:
     -----------
@@ -595,13 +674,13 @@ def expected_out(player1, player2, surface, matches=matches, weight_surface=0.9,
         The name of the first player (e.g., the 'Winner').
     player2 : str
         The name of the second player (e.g., the 'Loser').
-    surface : str
-        The surface on which the match is played. Can be "Clay", "Hard", or "Grass".
+    Surface : str
+        The Surface on which the match is played. Can be "Clay", "Hard", or "Grass".
     matches : pd.DataFrame, optional
         A DataFrame containing historical match data used to calculate head-to-head (H2H) records (default is `matches`).
-    weight_surface : float, optional
-        The weight given to surface-specific Elo ratings when calculating the combined Elo (default is 0.9). 
-        The overall Elo weight is `1 - weight_surface`.
+    weight_Surface : float, optional
+        The weight given to Surface-specific Elo ratings when calculating the combined Elo (default is 0.9). 
+        The overall Elo weight is `1 - weight_Surface`.
     h2h_weight : float, optional
         The weight given to the head-to-head (H2H) record in adjusting the final Elo ratings (default is 15).
 
@@ -610,7 +689,7 @@ def expected_out(player1, player2, surface, matches=matches, weight_surface=0.9,
     expected_probA : float
         The probability of player1 winning based solely on overall Elo ratings.
     expected_probS : float
-        The probability of player1 winning after combining overall and surface-specific Elo ratings.
+        The probability of player1 winning after combining overall and Surface-specific Elo ratings.
     expected_probH : float
         The probability of player1 winning after combining Elo ratings and applying head-to-head adjustments.
     h2h_matches_info : pd.DataFrame
@@ -618,33 +697,33 @@ def expected_out(player1, player2, surface, matches=matches, weight_surface=0.9,
 
     Notes:
     ------
-    - Elo ratings are combined based on a weighted average of the overall and surface-specific Elo.
+    - Elo ratings are combined based on a weighted average of the overall and Surface-specific Elo.
     - Head-to-head records are used to further adjust the combined Elo, enhancing the final win probability.
-    - The function considers the specific surface (Clay, Hard, Grass) for surface-specific Elo adjustment.
+    - The function considers the specific Surface (Clay, Hard, Grass) for Surface-specific Elo adjustment.
     """
-    weight_all = 1 - weight_surface
+    weight_all = 1 - weight_Surface
     
     # Get Elo ratings from elo_df
     elo1_all = elo_df.loc[player1]
     elo2_all = elo_df.loc[player2]
     
-    # Determine surface-specific Elo ratings
-    if surface == "Clay":
-        elo1_surface = elo1_all[2]
-        elo2_surface = elo2_all[2]
-    elif surface == "Hard":
-        elo1_surface = elo1_all[3]
-        elo2_surface = elo2_all[3]
-    elif surface == "Grass":
-        elo1_surface = elo1_all[1]
-        elo2_surface = elo2_all[1]
+    # Determine Surface-specific Elo ratings
+    if Surface == "Clay":
+        elo1_Surface = elo1_all[2]
+        elo2_Surface = elo2_all[2]
+    elif Surface == "Hard":
+        elo1_Surface = elo1_all[3]
+        elo2_Surface = elo2_all[3]
+    elif Surface == "Grass":
+        elo1_Surface = elo1_all[1]
+        elo2_Surface = elo2_all[1]
     else:
-        elo1_surface = elo1_all[0]
-        elo2_surface = elo2_all[0]
+        elo1_Surface = elo1_all[0]
+        elo2_Surface = elo2_all[0]
     
-    # Combine overall and surface-specific Elo ratings
-    combined_elo1 = weight_all * elo1_all[0] + weight_surface * elo1_surface
-    combined_elo2 = weight_all * elo2_all[0] + weight_surface * elo2_surface
+    # Combine overall and Surface-specific Elo ratings
+    combined_elo1 = weight_all * elo1_all[0] + weight_Surface * elo1_Surface
+    combined_elo2 = weight_all * elo2_all[0] + weight_Surface * elo2_Surface
     
     # Calculate probabilities
     expected_probA = 1 / (1 + 10 ** ((elo2_all[0] - elo1_all[0]) / 400))
@@ -665,14 +744,14 @@ def expected_out(player1, player2, surface, matches=matches, weight_surface=0.9,
     return expected_probA, expected_probS, expected_probH
 
 
-def plot_player_elo(player_info, player_name, position='left'):
+def plot_player_ratings(player_info, player_name, position='left'):
     """
-    Generate a horizontal bar chart displaying the player's Elo ratings across different surfaces.
+    Generate a horizontal bar chart displaying the player's Elo ratings across different Surfaces.
 
     Parameters:
     -----------
     player_info : dict
-        A dictionary containing the player's Elo ratings for overall, grass, clay, and hard surfaces. 
+        A dictionary containing the player's Elo ratings for overall, grass, clay, and hard Surfaces. 
         Keys should include:
         - 'elo_all' for the overall Elo rating,
         - 'elo_grass' for the Elo rating on grass,
@@ -698,13 +777,14 @@ def plot_player_elo(player_info, player_name, position='left'):
     """
     # Create a DataFrame from the player_info
     df = pd.DataFrame({
-        'Stat': ['Overall Elo', 'Grass Elo', 'Clay Elo', 'Hard Elo'],
+        'Stat': ['RD', 'Glicko', 'Overall Elo', 'Grass Elo', 'Clay Elo', 'Hard Elo'],
         'Value': [
+            player_info['glicko_rd'],
+            player_info['glicko_r'],
             player_info['elo_all'],
             player_info['elo_grass'],
             player_info['elo_clay'],
-            player_info['elo_hard'] 
-                ]
+            player_info['elo_hard']]
     })
 
     # Define bar colors and x-axis position based on the player position
@@ -736,7 +816,7 @@ def plot_player_elo(player_info, player_name, position='left'):
         ),
         showlegend=False,
         width=900,
-        height=300)
+        height=400)
         
     #fig.update_xaxes(range=[1000, 2500])
     return fig
@@ -906,14 +986,13 @@ def calculate_ev(expected_prob, odds, stake):
     return ev
 
 
-# Function to calculate Vigor (Vig)
 def calculate_vig(implied_prob_1, implied_prob_2):
     total_implied_prob = implied_prob_1 + implied_prob_2
     vig = total_implied_prob - 1
     return vig
 
 
-def live_match_maker(player_1, player_2, surface, model, odds_1, odds_2, stake=100):
+def live_match_maker(player_1, player_2, Surface, model, odds_1, odds_2, stake=100):
     """
     Calculate the Expected Value (EV) for betting on a tennis match between two players,
     using different Elo models, and provide a decision on whether to place a bet.
@@ -922,7 +1001,7 @@ def live_match_maker(player_1, player_2, surface, model, odds_1, odds_2, stake=1
     -----------
     player_1: str Name of Player 1.
     player_2: str Name of Player 2.
-    surface: str The surface type (Hard, Clay, Grass)
+    Surface: str The Surface type (Hard, Clay, Grass)
     model: int The model to use for probability calculation:
                 0 - Overall Elo, 1 - Surface-specific Elo, 2 - Head-to-Head Elo
     odds_1 : float The bookmaker's odds for Player 1. 
@@ -937,7 +1016,7 @@ def live_match_maker(player_1, player_2, surface, model, odds_1, odds_2, stake=1
     """
     
     # Calculate the expected probability of Player 1 winning
-    prob_1 = expected_out(player_1, player_2, surface=surface)[model]
+    prob_1 = expected_out(player_1, player_2, Surface=Surface)[model]
     
     # Player 2's probability is the complement of Player 1's probability
     prob_2 = 1 - prob_1
@@ -1004,7 +1083,7 @@ def calculate_custom_stake(ev, prob, odds):
 
 def calculate_bet(row, prob_column, odds_type='best', criterion='EV', stake=100, 
                  min_ev=0, min_odds=1.5, max_odds=3.0, min_prob=0.55, 
-                 surface=None, custom_stake=True):
+                 Surface=None, custom_stake=True):
     """
     Calculates the bet decision, EV, implied probability, and additional filters for a match.
     
@@ -1018,7 +1097,7 @@ def calculate_bet(row, prob_column, odds_type='best', criterion='EV', stake=100,
     - min_odds (float): Minimum odds to consider a bet.
     - max_odds (float): Maximum odds to consider a bet.
     - min_prob (float): Minimum expected probability for placing a bet.
-    - surface (str): Optional filter to place bets only on specific surfaces.
+    - Surface (str): Optional filter to place bets only on specific Surfaces.
     - custom_stake (bool): Whether to use a custom stake calculation.
     
     Returns:
@@ -1039,8 +1118,8 @@ def calculate_bet(row, prob_column, odds_type='best', criterion='EV', stake=100,
     ev_1 = stake * (expected_prob_1 * odds_1 - 1)
     ev_2 = stake * (expected_prob_2 * odds_2 - 1)
     
-    # Filter based on surface
-    if surface and row['surface'] != surface:
+    # Filter based on Surface
+    if Surface and row['Surface'] != Surface:
         return {'bet_on': None, 'ev_1': ev_1, 'ev_2': ev_2, 'profit_loss': 0, 
                 'vigorish': None, 'stake': 0}
     
@@ -1055,24 +1134,24 @@ def calculate_bet(row, prob_column, odds_type='best', criterion='EV', stake=100,
     # Determine the bet decision based on the criterion and apply stake
     if criterion == 'EV':
         if ev_1 > ev_2 and ev_1 > 0:
-            bet_on = row['winner_name']
+            bet_on = row['Winner']
             selected_ev = ev_1
             if custom_stake:
                 stake = calculate_custom_stake(selected_ev, expected_prob_1, odds_1)
-                profit_loss = stake * (odds_1 - 1) if row['winner_name'] == row['winner_name'] else -stake
+                profit_loss = stake * (odds_1 - 1) if row['Winner'] == row['Winner'] else -stake
                 print(f"Bet R{stake:.0f} on {bet_on}")
             else:
-                profit_loss = stake * (odds_1 - 1) if row['winner_name'] == row['winner_name'] else -stake
+                profit_loss = stake * (odds_1 - 1) if row['Winner'] == row['Winner'] else -stake
                 print(f"Bet R{stake:.0f} on {bet_on}")
         elif ev_2 > ev_1 and ev_2 > 0:
-            bet_on = row['loser_name']
+            bet_on = row['Loser']
             selected_ev = ev_2
             if custom_stake:
                 stake = calculate_custom_stake(selected_ev, expected_prob_2, odds_2)                
-                profit_loss = stake * (odds_2 - 1) if row['loser_name'] == row['winner_name'] else -stake
+                profit_loss = stake * (odds_2 - 1) if row['Loser'] == row['Winner'] else -stake
                 print(f"Bet R{stake:.0f} on {bet_on}")
             else:
-                profit_loss = stake * (odds_2 - 1) if row['loser_name'] == row['winner_name'] else -stake
+                profit_loss = stake * (odds_2 - 1) if row['Loser'] == row['Winner'] else -stake
                 print(f"Bet R{stake:.0f} on {bet_on}")
         else:
             bet_on = None
@@ -1080,24 +1159,24 @@ def calculate_bet(row, prob_column, odds_type='best', criterion='EV', stake=100,
             selected_ev = 0
     elif criterion == 'implied':
         if implied_prob_1 < expected_prob_1 and ev_1 > 0:
-            bet_on = row['winner_name']
+            bet_on = row['Winner']
             selected_ev = ev_1
             if custom_stake:
                 stake = calculate_custom_stake(selected_ev, expected_prob_1, odds_1)
-                profit_loss = stake * (odds_1 - 1) if row['winner_name'] == row['winner_name'] else -stake
+                profit_loss = stake * (odds_1 - 1) if row['Winner'] == row['Winner'] else -stake
                 print(f"Bet R{stake:.0f} on {bet_on}")
             else:
-                profit_loss = stake * (odds_1 - 1) if row['winner_name'] == row['winner_name'] else -stake
+                profit_loss = stake * (odds_1 - 1) if row['Winner'] == row['Winner'] else -stake
                 print(f"Bet R{stake:.0f} on {bet_on}")
         elif implied_prob_2 < expected_prob_2 and ev_2 > 0:
-            bet_on = row['loser_name']
+            bet_on = row['Loser']
             selected_ev = ev_2
             if custom_stake:
                 stake = calculate_custom_stake(selected_ev, expected_prob_2, odds_2) 
-                profit_loss = stake * (odds_2 - 1) if row['loser_name'] == row['winner_name'] else -stake
+                profit_loss = stake * (odds_2 - 1) if row['Loser'] == row['Winner'] else -stake
                 print(f"Bet R{stake:.0f} on {bet_on}")
             else:
-                profit_loss = stake * (odds_2 - 1) if row['loser_name'] == row['winner_name'] else -stake
+                profit_loss = stake * (odds_2 - 1) if row['Loser'] == row['Winner'] else -stake
                 print(f"Bet R{stake:.0f} on {bet_on}")
         else:
             bet_on = None
@@ -1124,7 +1203,7 @@ def calculate_bet(row, prob_column, odds_type='best', criterion='EV', stake=100,
 
 def backtest_strategy(matches, prob_column, odds_type='B365', criterion='implied', 
                       stake=100, min_ev=5, min_odds=1.5, max_odds=2.5, min_prob=0.6, 
-                      surface=None, custom_stake=True):
+                      Surface=None, custom_stake=True):
     """
     Backtests the betting strategy over the given matches and adds the results to the matches DataFrame.
     
@@ -1163,7 +1242,7 @@ def backtest_strategy(matches, prob_column, odds_type='B365', criterion='implied
         bet_result = calculate_bet(match, prob_column=prob_column, odds_type=odds_type, 
                                 criterion=criterion, min_ev=min_ev, min_odds=min_odds, 
                                 max_odds=max_odds, min_prob=min_prob, 
-                                surface=surface, custom_stake=custom_stake)
+                                Surface=Surface, custom_stake=custom_stake)
 
         # Update profit and loss
         if bet_result['bet_on']:
@@ -1184,7 +1263,7 @@ def backtest_strategy(matches, prob_column, odds_type='B365', criterion='implied
             matches_bet.at[idx, 'implied_prob_2'] = bet_result['implied_prob_2']
             matches_bet.at[idx, 'stake'] = bet_result['stake']
             matches_bet['selected_ev'] = matches_bet.apply(
-            lambda row: row['ev_1'] if row['winner_name'] == row['bet_on'] else row['ev_2'], axis=1)
+            lambda row: row['ev_1'] if row['Winner'] == row['bet_on'] else row['ev_2'], axis=1)
     
     matches_bet['bet_eval'] = matches_bet['profit_loss'].apply(
     lambda x: 1 if x > 0 else (0 if x < 0 else -99))
@@ -1196,7 +1275,7 @@ def backtest_strategy(matches, prob_column, odds_type='B365', criterion='implied
     total_stake = sum(matches_bet['stake'])
     roi = (total_profit / (total_bets * stake)) * 100 if total_bets > 0 else 0
     
-    matches_bet['tourney_date'] = pd.to_datetime(matches_bet['tourney_date'])     
+    matches_bet['Date'] = pd.to_datetime(matches_bet['Date'])     
     # Return a summary of the backtest results and the updated matches DataFrame
     return {
         'total_profit': total_profit,
@@ -1328,12 +1407,11 @@ def plot_roi_by_ev(backtest_results):
     st.plotly_chart(fig)
 
 
-
-def plot_profit_by_surface(backtest_results):
-    profit_by_surface = backtest_results.groupby('surface')['profit_loss'].sum()
+def plot_profit_by_Surface(backtest_results):
+    profit_by_Surface = backtest_results.groupby('Surface')['profit_loss'].sum()
 
     fig = go.Figure(data=[
-        go.Bar(x=profit_by_surface.index, y=profit_by_surface.values,
+        go.Bar(x=profit_by_Surface.index, y=profit_by_Surface.values,
                marker_color=colors['win'])
     ])
 
@@ -1401,37 +1479,37 @@ def ev_vs_actual_profit(backtest_results):
     st.plotly_chart(fig)
 
 
-def player_info_tool(players, matches, elo_df):
+def player_info_tool(players, matches, elo_df, glicko_df):
     # Search bar to search for a player by name
     leftcol, rightcol = st.columns([1,2])
     with leftcol:
-        player_name_input = st.text_input(label="Enter Player Name Below", 
-                                          label_visibility="hidden",
-                                          placeholder="Enter Player Name here")
+        player_name_input = st.selectbox("Select a player's name:", 
+                                         st.session_state.players['Player Name'],
+                                         placeholder="Enter Player Name Here",
+                                         label_visibility='hidden',
+                                         index=None)
     st.divider()
     if player_name_input:
-        # Ensure 'Player Name' column has no NaN values for filtering
-        players['Player Name'] = players['Player Name'].fillna("")
-        # Fetch wiki info on player
-        paragraph, photo_url = fetch_wikipedia_info(player_name_input)
+       
         # Filter the players DataFrame by player name
-        filtered_players = players[players['Player Name'].str.contains(player_name_input, case=False, na="")]
+        filtered_players = players[players['Player Name'].str.contains(player_name_input, case=False)]
 
         if not filtered_players.empty:
             for _, row in filtered_players.iterrows():
                 
                 # Display player details from the players and matches DataFrame
                 st.subheader(f"Player: {row['Player Name']}")
-                
+                logger.info(f"Player data for {row['Player Name']} Generated")
                 with st.expander(":green[Biography]", expanded=True):
                     # Use columns to split the layout into Photo and blurb
                     col1, col2 = st.columns([2,5])
                 
                     # Left column for player photo
                     with col1:
-                        if photo_url != None:
-                            st.image(photo_url, 
-                                     caption="image from wikipedia")
+                        # Now using photo_url directly from the players DataFrame
+                        if pd.notna(row['photo_url']):
+                            st.image(row['photo_url'], 
+                                     caption="Image from Wikipedia")
                         else:
                             st.error("No photo available")
                     # Right column for player info
@@ -1453,24 +1531,28 @@ def player_info_tool(players, matches, elo_df):
                             st.write('Plays: Like a Ninja')
                         else:
                             st.write("Plays unknown")
-                        player_info = get_player_info(player_name_input, players, elo_df)
-                        
+
+                        # Elo information
+                        player_info = get_player_info(player_name_input, players, elo_df, glicko_df)
                         if player_name_input in elo_df.index:
                             st.write(f":green[Elo Rating:] {player_info['elo_all']:.0f}")
-                            st.write(f":green[ATP Ranking:] {player_info['Ranking']:.0f} *({player_info['Ranking_Date']})* ")
-                            if abs((max_d - player_info['Ranking_Date']).days) <= 30:
+                        # Glicko information (R_value and RD_value)
+                        if player_name_input in glicko_df.index:
+                            st.write(f":green[Glicko Rating:] {glicko_df.at[player_name_input, 'R_value']:.0f} *(RD of {glicko_df.at[player_name_input, 'RD_value']:.0f})*")
+                    
+                                    
+                        st.write(f":green[ATP Ranking:] {player_info['Ranking']:.0f} *({player_info['Ranking_Date']})* ")
+                        if abs((max_d - player_info['Ranking_Date']).days) <= 30:
                                 st.write(':green-background[Active]')
-                            elif abs((max_d - player_info['Ranking_Date']).days) <= 90:
+                        elif abs((max_d - player_info['Ranking_Date']).days) <= 90:
                                 st.write(':blue-background[> 30 days since last match]')
-                            elif abs((max_d - player_info['Ranking_Date']).days) <= 300:
+                        elif abs((max_d - player_info['Ranking_Date']).days) <= 300:
                                 st.write(':grey-background[Inactive]')
-                            else:
-                                st.write(':red-background[Retired]')
                         else:
-                           st.write(':red-background[Retired]')
-                            
-                        #st.subheader("Overview:")
-                        st.write(paragraph)
+                                st.write(':red-background[Retired]')
+                                           
+                        # Player biography directly from the players DataFrame
+                        st.write(row['wikipedia_intro'])
                         
                 with st.expander(":green[Statistics]", expanded=False):
                     # Use columns to split the sliders
@@ -1478,7 +1560,7 @@ def player_info_tool(players, matches, elo_df):
                     with col1:
                         with st.container(height=120, border=True):
                             # Surface filter selection
-                            surface = st.radio("Surface", options=['All', 'Grass', 'Clay', 'Hard'], 
+                            Surface = st.radio("Surface", options=['All', 'Grass', 'Clay', 'Hard'], 
                                 index=0, horizontal=True, key='s1')
                     with col2:
                         with st.container(height=120, border=True):
@@ -1489,22 +1571,22 @@ def player_info_tool(players, matches, elo_df):
 
                             # Filter player matches by inputs:
                             player_matches = matches[
-                            (matches['winner_name'] == row['Player Name']) |
-                            (matches['loser_name'] == row['Player Name'])
+                            (matches['Winner'] == row['Player Name']) |
+                            (matches['Loser'] == row['Player Name'])
                             ].copy()
-                    # Apply surface filter
-                    if surface != 'All':
-                        player_matches = player_matches[player_matches['surface'] == surface]
+                    # Apply Surface filter
+                    if Surface != 'All':
+                        player_matches = player_matches[player_matches['Surface'] == Surface]
                     # Apply date range filter
                     if d_range == 'Year':
                         current_year = datetime.now().year
                         player_matches = player_matches[
-                            player_matches['tourney_date'].dt.year == current_year]
+                            player_matches['Date'].dt.year == current_year]
                     elif d_range == 'Recent':
                             player_matches = player_matches.tail(30)                  
                     # build stats from filtered data
                     total_matches = len(player_matches)
-                    wins = len(player_matches[player_matches['winner_name'] == row['Player Name']])
+                    wins = len(player_matches[player_matches['Winner'] == row['Player Name']])
                     win_percentage = (wins / total_matches) * 100 if total_matches > 0 else 0
 
                     col1, col2 = st.columns([3, 5])
@@ -1536,53 +1618,65 @@ def player_info_tool(players, matches, elo_df):
                                          x_label=f'Opponent {bin_type}',
                                          color=[colors['lose'],colors['win']],
                                          use_container_width=True)  
-                    player_matches['Date'] = player_matches['tourney_date'].dt.date
-                    selected_columns = ['Date', 'surface', 'Tournament',
-                                        'Round', 'winner_name', 'loser_name', 'Scores']
+                    player_matches['Date'] = player_matches['Date'].dt.date
+                    selected_columns = ['Date', 'Surface', 'Tournament',
+                                        'Round', 'Winner', 'Loser', 'Scores']
                     player_matches_d = player_matches[selected_columns].copy()
                     # Display the filtered data
                     st.dataframe(player_matches_d, hide_index=True,
                                  use_container_width=True)
                     
-                with st.expander(":green[Ranking and Elo Rating]", expanded=False):               
+                with st.expander(":green[Ranking and Ratings]", expanded=False):               
                     # Show recent match results from `matches`
-                    other_matches = matches[
-                        (matches['winner_name'] == row['Player Name']) | 
-                        (matches['loser_name'] == row['Player Name'])
+                    elo_matches = matches_elo[
+                        (matches_elo['Winner'] == row['Player Name']) | 
+                        (matches_elo['Loser'] == row['Player Name'])
+                        ].copy()                    
+                    glicko_matches = matches_glicko[
+                        (matches_glicko['Winner'] == row['Player Name']) | 
+                        (matches_glicko['Loser'] == row['Player Name'])
                         ].copy()
-                
                     # Track player ranking and Elo ratings
-                    other_matches['Player_Rank'] = other_matches.apply(
-                        lambda x: x['WRank'] if x['winner_name'] == row['Player Name'] else x['LRank'], axis=1)
+                    elo_matches['Player_Rank'] = elo_matches.apply(
+                        lambda x: x['WRank'] if x['Winner'] == row['Player Name'] else x['LRank'], axis=1)
                 
-                    other_matches['Player_Elo_After'] = other_matches.apply(
-                        lambda x: x['elo_winner_after'] if x['winner_name'] == row['Player Name'] else x['elo_loser_after'], axis=1)
+                    elo_matches['Player_Elo_After'] = elo_matches.apply(
+                        lambda x: x['elo_winner_after'] if x['Winner'] == row['Player Name'] else x['elo_loser_after'], axis=1)
+                    
+                    glicko_matches['Player_Glicko_After'] = glicko_matches.apply(
+                        lambda x: x['r_winner_after'] if x['Winner'] == row['Player Name'] else x['r_loser_after'], axis=1)
                 
                     # Sort the matches by date for the plot
-                    other_matches['Date'] = pd.to_datetime(other_matches['tourney_date'])
-                    other_matches = other_matches.sort_values(by='Date')
+                    elo_matches['Date'] = pd.to_datetime(elo_matches['Date'])
+                    elo_matches = elo_matches.sort_values(by='Date')
                 
-                    if not other_matches.empty:
+                    if not elo_matches.empty:
                     # Plot rankings and Elo rating over time using Plotly
                         fig = go.Figure()
 
                         # Add the ranking data to the plot
                         fig.add_trace(go.Scatter(
-                            x=other_matches['Date'],
-                            y=other_matches['Player_Rank'],
+                            x=elo_matches['Date'],
+                            y=elo_matches['Player_Rank'],
                             mode='lines+markers',
                             name='ATP Ranking',
                             line=dict(color=colors['line1']),
                             yaxis='y1'))
-                        # Add the Elo rating data to the plot
+                        # Add the Elo/Glicko rating data to the plot
                         fig.add_trace(go.Scatter(
-                            x=other_matches['Date'],
-                            y=other_matches['Player_Elo_After'],
+                            x=elo_matches['Date'],
+                            y=elo_matches['Player_Elo_After'],
                             mode='lines+markers',
                             name='Elo Rating',
                             line=dict(color=colors['line1a']),
                             yaxis='y2'))
-
+                        fig.add_trace(go.Scatter(
+                            x=elo_matches['Date'],
+                            y=glicko_matches['Player_Glicko_After'],
+                            mode='lines+markers',
+                            name='Glicko Rating',
+                            line=dict(color=colors['gauge2']),
+                            yaxis='y2'))
                         # Layout for dual axis
                         fig.update_layout(
                             xaxis_title="Date",
@@ -1594,7 +1688,7 @@ def player_info_tool(players, matches, elo_df):
                                 autorange="reversed",  # Rankings are better when they are lower
                                 ),
                             yaxis2=dict(
-                                title=' Elo Rating',
+                                title=' Elo & Glicko Rating',
                                 side='right',
                                 overlaying='y',
                                 showgrid=False,
@@ -1626,31 +1720,25 @@ def player_comparison_tool(players, elo_df, matches):
     leftcol, rightcol = st.columns(2)
     # Player 1 Input
     with leftcol:
-        player_1_input = st.text_input(label=f"Search :blue[Player 1]", 
-                                          label_visibility="visible",
-                                          placeholder="Enter Player Name here")     
+        player_1_input = st.selectbox(f"Search :blue[Player 1]", 
+                                         st.session_state.players['Player Name'],
+                                         placeholder="Enter Player Name Here", index=None)    
     # Player 2 Input
     with rightcol:
-        player_2_input = st.text_input(label=f"Search :orange[Player 2]", 
-                                          label_visibility="visible",
-                                          placeholder="Enter Player Name here")    
-    st.divider()        
+        player_2_input = st.selectbox(f"Search :orange[Player 2]", 
+                                          st.session_state.players['Player Name'],
+                                          placeholder="Enter Player Name here", index=None)    
+    st.divider()  
+      
     # Set conditions for comparison
-    if player_1_input in elo_df.index:
-        # Ensure 'Player Name' column has no NaN values for filtering
-        players['Player Name'] = players['Player Name'].fillna("")
-        # Fetch info on player
-        paragraph1, photo_url1 = fetch_wikipedia_info(player_1_input)
-        player_1_info = get_player_info(player_1_input, players, elo_df)
+    if player_1_input:
+        player_1_info = get_player_info(player_1_input, players, elo_df, glicko_df)
         # Filter the players DataFrame by player name
         filtered_players1 = players[players['Player Name'].str.contains(player_1_input, case=False, na="")]
         
-        if player_2_input in elo_df.index:
+        if player_2_input:
             # Ensure 'Player Name' column has no NaN values for filtering
-            players['Player Name'] = players['Player Name'].fillna("")
-            # Fetch info on player
-            paragraph2, photo_url2 = fetch_wikipedia_info(player_2_input)
-            player_2_info = get_player_info(player_2_input, players, elo_df)
+            player_2_info = get_player_info(player_2_input, players, elo_df, glicko_df)
             # Filter the players DataFrame by player name
             filtered_players2 = players[players['Player Name'].str.contains(player_2_input, case=False, na="")]            
         
@@ -1672,10 +1760,10 @@ def player_comparison_tool(players, elo_df, matches):
                                     </p>
                                     """, unsafe_allow_html=True)
                         with st.container(height=400, border=False):
-                            if photo_url1 != None:
-                                col1, col2, col3 = st.columns([1,2,1])
-                                with col2: 
-                                    st.image(photo_url1, use_column_width='always')
+                            # Now using photo_url directly from the players DataFrame
+                            if filtered_players1['photo_url'].notna().all():
+                                st.image(filtered_players1['photo_url'].values[0], 
+                                         caption="Image from Wikipedia")
                             else:
                                 st.error("No photo available")
                             # Player 1 stats
@@ -1730,9 +1818,9 @@ def player_comparison_tool(players, elo_df, matches):
                                         f"<span style='color: white;'>{player_1_info['Ranking']:.0f} "
                                         f"<span style='font-style: italic;'>( {player_1_info['Ranking_Date']} )</span></span></p>", 
                                         unsafe_allow_html=True)
-                            player_1_chart = plot_player_elo(player_1_info, player_1_input, position='left')
+                            player_1_chart = plot_player_ratings(player_1_info, player_1_input, position='left')
                             st.plotly_chart(player_1_chart)
-                            st.write(paragraph1)
+                            #st.write(f"{filtered_players1['wikipedia_intro']}")
                                                 
                 with player2col:
                     with st.container(border=True):
@@ -1742,10 +1830,9 @@ def player_comparison_tool(players, elo_df, matches):
                                     </p
                                     """, unsafe_allow_html=True)
                         with st.container(height=400, border=False):
-                            if photo_url2 != None:
-                                col1, col2, col3 = st.columns([1,2,1])
-                                with col2: 
-                                    st.image(photo_url2, use_column_width='always')
+                            if filtered_players2['photo_url'].notna().all():
+                                st.image(filtered_players2['photo_url'].values[0], 
+                                         caption="Image from Wikipedia")
                             else:
                                 st.error("No photo available")
                         # player 2 stats
@@ -1801,9 +1888,9 @@ def player_comparison_tool(players, elo_df, matches):
                                         f"<span style='color: white;'>{player_2_info['Ranking']:.0f} "
                                         f"<span style='font-style: italic;'>( {player_2_info['Ranking_Date']} )</span></span></p>", 
                                         unsafe_allow_html=True)
-                            player_2_chart = plot_player_elo(player_2_info, player_2_input, position='right')
+                            player_2_chart = plot_player_ratings(player_2_info, player_2_input, position='right')
                             st.plotly_chart(player_2_chart)
-                            st.write(paragraph2)
+                            #st.write(filtered_players2['wikipedia_intro'])
 
             # Show basic statistics
             with st.expander(":green[Statistics Comparison]", expanded=False):
@@ -1818,7 +1905,7 @@ def player_comparison_tool(players, elo_df, matches):
                 with col1:
                     with st.container(height=120, border=True):
                         # Surface filter selection
-                        surface = st.radio("Surface", options=['All', 'Grass', 'Clay', 'Hard'], 
+                        Surface = st.radio("Surface", options=['All', 'Grass', 'Clay', 'Hard'], 
                                 index=0, horizontal=True, key='s1')
                 with col2:
                     with st.container(height=120, border=True):
@@ -1830,31 +1917,31 @@ def player_comparison_tool(players, elo_df, matches):
                         # choose matches based on player selected
                         if player_selector == f'{player_1_input}':
                             player_matches = matches[
-                                (matches['winner_name'] == player_1_input) |
-                                (matches['loser_name'] == player_1_input)
+                                (matches['Winner'] == player_1_input) |
+                                (matches['Loser'] == player_1_input)
                                 ].copy()
                         else:
                             player_matches = matches[
-                                (matches['winner_name'] == player_2_input) |
-                                (matches['loser_name'] == player_2_input)
+                                (matches['Winner'] == player_2_input) |
+                                (matches['Loser'] == player_2_input)
                                 ].copy()
                             
-                        # Apply surface filter
-                        if surface != 'All':
-                            player_matches = player_matches[player_matches['surface'] == surface]
+                        # Apply Surface filter
+                        if Surface != 'All':
+                            player_matches = player_matches[player_matches['Surface'] == Surface]
                         # Apply date range filter
                         if d_range == 'Year':
                             current_year = datetime.now().year
                             player_matches = player_matches[
-                                player_matches['tourney_date'].dt.year == current_year]
+                                player_matches['Date'].dt.year == current_year]
                         elif d_range == 'Recent':
                             player_matches = player_matches.tail(30)                  
                         # build stats from filtered data
                         total_matches = len(player_matches)
                         if player_selector == f'{player_1_input}':
-                            wins = len(player_matches[player_matches['winner_name'] == player_1_input])
+                            wins = len(player_matches[player_matches['Winner'] == player_1_input])
                         else:
-                            wins = len(player_matches[player_matches['winner_name'] == player_2_input])
+                            wins = len(player_matches[player_matches['Winner'] == player_2_input])
                         
                         win_percentage = (wins / total_matches) * 100 if total_matches > 0 else 0
 
@@ -1892,9 +1979,9 @@ def player_comparison_tool(players, elo_df, matches):
                                          x_label=f'Opponent {bin_type}',
                                          color=[colors['lose'],colors['win']],
                                          use_container_width=True)  
-                        player_matches['Date'] = player_matches['tourney_date'].dt.date
-                        selected_columns = ['Date', 'surface', 'Tournament',
-                                        'Round', 'winner_name', 'loser_name', 'Scores']
+                        player_matches['Date'] = player_matches['Date'].dt.date
+                        selected_columns = ['Date', 'Surface', 'Tournament',
+                                        'Round', 'Winner', 'Loser', 'Scores']
                         player_matches_d = player_matches[selected_columns].copy()
                 # Display the filtered data
                 if player_selector == f'{player_1_input}':
@@ -1908,15 +1995,15 @@ def player_comparison_tool(players, elo_df, matches):
             # Plot rankings and Elo ratings over time for both players
             with st.expander(label=':green[ATP Ranking and Elo Ratings Comparison]', expanded=False):
     
-                player_1_graph_data = prepare_ranking_and_elo_graph(player_1_input, matches.copy())
-                player_2_graph_data = prepare_ranking_and_elo_graph(player_2_input, matches.copy())
+                player_1_graph_data = prepare_ranking_rating_graph(player_1_input, matches_elo, matches_glicko)
+                player_2_graph_data = prepare_ranking_rating_graph(player_2_input, matches_elo, matches_glicko)
 
                 if not player_1_graph_data.empty and not player_2_graph_data.empty:
                     fig = go.Figure()
                     
                     # Player 1 data
                     fig.add_trace(go.Scatter(
-                        x=player_1_graph_data['tourney_date'],
+                        x=player_1_graph_data['Date'],
                         y=player_1_graph_data['Player_Rank'],
                         mode='lines',
                         name=f'{player_1_input} Ranking',
@@ -1924,16 +2011,24 @@ def player_comparison_tool(players, elo_df, matches):
                         yaxis='y1'
                         ))
                     fig.add_trace(go.Scatter(
-                        x=player_1_graph_data['tourney_date'],
+                        x=player_1_graph_data['Date'],
                         y=player_1_graph_data['Player_Elo_After'],
                         mode='markers',
                         name=f'{player_1_input} Elo Rating',
                         line=dict(color=colors['player1a']),
                         yaxis='y2'
                         ))
+                    fig.add_trace(go.Scatter(
+                        x=player_1_graph_data['Date'],
+                        y=player_1_graph_data['Player_Glicko_After'],
+                        mode='markers',
+                        name=f'{player_1_input} Glicko Rating',
+                        line=dict(color=colors['line2a']),
+                        yaxis='y2'
+                        ))
                     # Player 2 data
                     fig.add_trace(go.Scatter(
-                        x=player_2_graph_data['tourney_date'],
+                        x=player_2_graph_data['Date'],
                         y=player_2_graph_data['Player_Rank'],
                         mode='lines',
                         name=f'{player_2_input} Ranking',
@@ -1941,11 +2036,19 @@ def player_comparison_tool(players, elo_df, matches):
                         yaxis='y1'
                         ))
                     fig.add_trace(go.Scatter(
-                        x=player_2_graph_data['tourney_date'],
+                        x=player_2_graph_data['Date'],
                         y=player_2_graph_data['Player_Elo_After'],
                         mode='markers',
                         name=f'{player_2_input} Elo Rating',
                         line=dict(color=colors['player2a']),
+                        yaxis='y2'
+                        ))
+                    fig.add_trace(go.Scatter(
+                        x=player_2_graph_data['Date'],
+                        y=player_2_graph_data['Player_Glicko_After'],
+                        mode='markers',
+                        name=f'{player_2_input} Glicko Rating',
+                        line=dict(color=colors['line1']),
                         yaxis='y2'
                         ))
                     # Layout for dual-axis graph
@@ -1958,7 +2061,7 @@ def player_comparison_tool(players, elo_df, matches):
                             autorange="reversed",
                             ),
                         yaxis2=dict(
-                            title='Player Elo Rating',
+                            title='Player Elo/Glicko Rating',
                             side='right',
                             overlaying='y',
                             showgrid=False,
@@ -1977,9 +2080,9 @@ def player_comparison_tool(players, elo_df, matches):
                 # Display Head-to-Head Matches
                 h2h_record, h2h_matches = calculate_head_to_head(player_1_input, player_2_input, matches)
                 if not h2h_matches.empty:
-                    h2h_matches['Date'] = h2h_matches['tourney_date'].dt.date
-                    # Reorder columns with 'Date' as the first column and drop 'tourney_date'
-                    columns_order = ['Date'] + [col for col in h2h_matches.columns if col != 'Date' and col != 'tourney_date']
+                    h2h_matches['Date'] = h2h_matches['Date'].dt.date
+                    # Reorder columns with 'Date' as the first column and drop 'Date'
+                    columns_order = ['Date'] + [col for col in h2h_matches.columns if col != 'Date' and col != 'Date']
                     h2h_matches_display = h2h_matches[columns_order]
                     sum1, sum2 = head_to_head_summary(player_1_input, player_2_input, h2h_matches)
                     st.write(sum1)
@@ -1992,8 +2095,8 @@ def player_comparison_tool(players, elo_df, matches):
                 leftcol, rightcol = st.columns([1,2])
                 with leftcol:
                     with st.container(border=True):
-                        # Menu to select the surface
-                        surface_C = st.radio("Match Surface", options=['All', 'Grass', 'Clay', 'Hard'], 
+                        # Menu to select the Surface
+                        Surface_C = st.radio("Match Surface", options=['All', 'Grass', 'Clay', 'Hard'], 
                                            index=0, horizontal=True, key='s7')
                         s_weight = st.slider('Surface Weight (%)', min_value=0.5,
                                              max_value=1.0, value=0.8, key='w2')
@@ -2006,10 +2109,10 @@ def player_comparison_tool(players, elo_df, matches):
                 with rightcol:
                     col1, col2, col3 = st.columns([1,10,1])
                     with col2:
-                        # Get the Elo ratings based on the chosen surface
+                        # Get the Elo ratings based on the chosen Surface
                         expected_probA, expected_probS, expected_probH = expected_out(player_1_input, player_2_input,
-                                                                                      surface_C, matches.copy(),
-                                                                                      weight_surface = s_weight,
+                                                                                      Surface_C, matches.copy(),
+                                                                                      weight_Surface = s_weight,
                                                                                       h2h_weight=h_weight)
                         
                         if model_select == "🅱️ BASELINE":   
@@ -2021,13 +2124,9 @@ def player_comparison_tool(players, elo_df, matches):
                             gauge_chart(expected_probH*100, 450, 350, title=f"Probability {player_1_input} wins")
                         # Display the result in an f-string       
                 st.write(f":b: The BASELINE expected probability of :blue[{player_1_input}] beating {player_2_input} is {expected_probA*100:.1f}%")
-                st.write(f":sparkle: The expected probability of :blue[{player_1_input}] beating {player_2_input} on {surface_C} is {expected_probS*100:.1f}%")
-                st.write(f":eight_spoked_asterisk: The expected probability of :blue[{player_1_input}] beating {player_2_input} on {surface_C} with H2H is {expected_probH*100:.1f}%")
-                    
-        
-        
-        else:
-            st.write("Enter :orange[Player2] to search and compare")
+                st.write(f":sparkle: The expected probability of :blue[{player_1_input}] beating {player_2_input} on {Surface_C} is {expected_probS*100:.1f}%")
+                st.write(f":eight_spoked_asterisk: The expected probability of :blue[{player_1_input}] beating {player_2_input} on {Surface_C} with H2H is {expected_probH*100:.1f}%")
+
     else:
         st.write("Enter :blue[Player1] and :orange[Player2] to search and compare")
 
@@ -2041,13 +2140,15 @@ def match_maker_tool():
         with st.container(border=True):
             col1, col2 = st.columns(2)
             with col1:
-                player_1 = st.text_input("Enter Player 1")
-                player_2 = st.text_input("Enter Player 2")
+                player_1 = st.selectbox(f"Enter :blue[Player 1]", 
+                                                 st.session_state.players['Player Name'], index=None) 
+                player_2 = st.selectbox(f"Enter :orange[Player 2]", 
+                                                 st.session_state.players['Player Name'], index=None)
             with col2:
                 odds_1 = st.number_input("Bookies odds for Player 1", min_value=1.01, value=1.96, step=0.01)
                 odds_2 = st.number_input("Bookies odds for Player 2", min_value=1.01, value=1.94, step=0.01)
               
-            surface = st.select_slider("Select the court surface", ["Hard", "Clay", "Grass"])
+            Surface = st.select_slider("Select the court Surface", ["Hard", "Clay", "Grass"])
             model = st.radio("Select the **Elo Model** to use", 
                              [("Overall", 0), 
                               ("Surface-Specific", 1), 
@@ -2063,7 +2164,7 @@ def match_maker_tool():
                 if player_1 and player_2:
                                                   
                     # Calculate the expected probability of Player 1 winning using the selected model
-                    prob_1 = expected_out(player_1, player_2, surface=surface)[model[1]]
+                    prob_1 = expected_out(player_1, player_2, Surface=Surface)[model[1]]
             
                     if odds_1 and odds_2:
                         # Calculate the implied probabilities from the bookmaker's odds
@@ -2072,14 +2173,14 @@ def match_maker_tool():
                         vig = calculate_vig(implied_prob_1, implied_prob_2)
 
                         # Run the Match Maker Tool to calculate EV
-                        ev_1, ev_2 = live_match_maker(player_1, player_2, surface, model[1], odds_1, odds_2, stake)
+                        ev_1, ev_2 = live_match_maker(player_1, player_2, Surface, model[1], odds_1, odds_2, stake)
                                               
                         # Display Vigor
                         st.write(f"**Bookmaker's Vigor:** {vig:.1%}")            
                         # Display decision-making
                         if ev_1 > 0:
-                            para, pic = fetch_wikipedia_info(player_1)
-                            st.image(pic)
+                            photo_url = players.loc[players['Player Name'] == player_1, 'photo_url'].dropna().values[0]
+                            st.image(photo_url, caption=f"Image of {player_1}") 
                             st.success(f"Betting on {player_1} has a positive EV")
                             # Display the results
                             st.write(f"**{player_1} EV:** R{ev_1:.2f}")
@@ -2088,8 +2189,8 @@ def match_maker_tool():
                             st.write(f"Our Model gives them a {1 - prob_1:.1%} chance to win while the bookies say {implied_prob_2:.1%}")
                             st.error(f"Betting on {player_2} has a negative EV")
                         elif ev_2 > 0:
-                            para, pic = fetch_wikipedia_info(player_2)
-                            st.image(pic)
+                            photo_url = players.loc[players['Player Name'] == player_2, 'photo_url'].dropna().values[0]
+                            st.image(photo_url, caption=f"Image of {player_2}") 
                             st.success(f"Betting on {player_2} has a positive EV")
                             # Display the results
                             st.write(f"**{player_2} EV:** R{ev_2:.2f}")
@@ -2209,7 +2310,7 @@ def tournament_draw_simulator_tool(elo_df):
 
     Args:
         elo_df (pd.DataFrame): A DataFrame containing player Elo ratings 
-                               with columns for different surfaces (e.g., 'Elo_ALL', 'Elo_Hard', etc.).
+                               with columns for different Surfaces (e.g., 'Elo_ALL', 'Elo_Hard', etc.).
 
     Functionality:
         - Allows the user to upload a CSV file with a list of players.
@@ -2290,7 +2391,7 @@ def backtest_strategy_tool(matches, max_d, backtest_strategy):
                                        options=['expected_probA', 'expected_probS', 'expected_probH'], index=0)
             criterion = st.selectbox("Decision Metric", options=['EV', 'implied'], index=0)
             odds_type = st.selectbox("Betting Odds Source", options=['B365', 'PS', 'best'], index=1)
-            surface = st.selectbox("Surface (Optional)", options=['All', 'Grass', 'Clay', 'Hard'], index=0)
+            Surface = st.selectbox("Surface (Optional)", options=['All', 'Grass', 'Clay', 'Hard'], index=0)
 
         with col2:
             # User inputs for other parameters
@@ -2321,18 +2422,18 @@ def backtest_strategy_tool(matches, max_d, backtest_strategy):
     # container to display output
     if st.button("RUN BACKTEST 🐪"):
         st.divider()
-        matches['tourney_date'] = pd.to_datetime(matches['tourney_date'])
-        filtered_matches = matches[(matches['tourney_date'].dt.date >= start_date) & (matches['tourney_date'].dt.date <= end_date)]
+        matches['Date'] = pd.to_datetime(matches['Date'])
+        filtered_matches = matches[(matches['Date'].dt.date >= start_date) & (matches['Date'].dt.date <= end_date)]
         st.markdown(f'**{len(filtered_matches)} matches** were played in the period you backtested')
-        if surface != 'All':
-            filtered_matches = filtered_matches[filtered_matches['surface'] == surface]
+        if Surface != 'All':
+            filtered_matches = filtered_matches[filtered_matches['Surface'] == Surface]
 
         with st.spinner(text='Running Backtesting Strategy...'):
             results = backtest_strategy(filtered_matches, prob_column=prob_column, 
                                       odds_type=odds_type, criterion=criterion,
                                       stake=stake, min_ev=min_ev, min_odds=min_odds, 
                                       max_odds=max_odds, min_prob=min_prob, 
-                                      surface=surface if surface != 'All' else None, 
+                                      Surface=Surface if Surface != 'All' else None, 
                                       custom_stake=custom_stake)
 
             results_df = results['matches_bet']
@@ -2384,13 +2485,13 @@ def backtest_strategy_tool(matches, max_d, backtest_strategy):
                 plot_win_rate_by_prob(results_df)
 
         with st.expander(":blue-background[Profitability]"):
-            st.write("Left plot shows where you made profit/loss, and that right plot shows what surface you made money on")    
+            st.write("Left plot shows where you made profit/loss, and that right plot shows what Surface you made money on")    
             # Create a two-column layout
             cola, colb = st.columns(2)
             with cola: 
                 plot_roi_by_ev(results_df)
             with colb:
-                plot_profit_by_surface(results_df)
+                plot_profit_by_Surface(results_df)
 
         with st.expander(":grey-background[Additional Graphics]"):
             st.write("Left plot shows which rounds you won/lost money on, and that right plot shows Expected value vs Actual Profit")     
@@ -2821,7 +2922,7 @@ def plot_filled_proportion_winners(df, prob_column=None, bins=10, bookmaker='B36
 
 
 # %% tools
-# %%
+
 # Main content based on the selected tool
 
 # player info tool
@@ -2830,13 +2931,13 @@ if tool == "Player Info":
     st.markdown("""
                 The :green[Player Info Tool] offers comprehensive player analysis.   
                 
-                Use this tool to get basic player information in the :green-background[Biography] Tab. Match history, win percentages, and surface performance  
+                Use this tool to get basic player information in the :green-background[Biography] Tab. Match history, win percentages, and Surface performance  
                 can be found in the :green-background[Statistics] Tab. View and analyze :green[Elo Rating] and  :green[ATP Ranking] history in the :green-background[Elo and Ranking] Tab.   
                 
                 Please note that :red-background[Betting Info] is still under development and will be added in a future release.
                 
     """)
-    player_info_tool(players, matches, elo_df)
+    player_info_tool(players, matches, elo_df, glicko_df)
     
 # player comparison tool
 elif tool == "Player Comparison":
@@ -2957,51 +3058,51 @@ if about is True:
                     """)
             st.write("Probabilities from Elo")
             st.code("""
-                    def expected_outcome(player1, player2, surface, weight_surface=0.9, h2h_weight=10):
+                    def expected_outcome(player1, player2, Surface, weight_Surface=0.9, h2h_weight=10):
                         ""
                         Calculate the expected outcome probabilities for a match between two players.
 
                         Parameters:
                         player1 (str): Name of the first player.
                         player2 (str): Name of the second player.
-                        surface (str): The surface type ('Grass', 'Clay', 'Hard').
-                        weight_surface (float): Weight given to the surface-specific Elo rating (default is 0.9).
+                        Surface (str): The Surface type ('Grass', 'Clay', 'Hard').
+                        weight_Surface (float): Weight given to the Surface-specific Elo rating (default is 0.9).
                         h2h_weight (int): Weight applied to the head-to-head record (default is 10).
                         
                         Returns:
                         tuple: A tuple containing the expected probabilities for Player 1 and Player 2 based on 
-                               overall Elo (probA for Player 1, probA_2 for Player 2), surface Elo (probS for Player 1, probS_2 for Player 2), 
+                               overall Elo (probA for Player 1, probA_2 for Player 2), Surface Elo (probS for Player 1, probS_2 for Player 2), 
                                and combined Elo including head-to-head history (probH for Player 1, probH_2 for Player 2).
                         ""
-                        weight_all = 1 - weight_surface
+                        weight_all = 1 - weight_Surface
                         
                         # Retrieve Elo ratings for both players
                         elo1_all = elo_ratings_all[player1]
                         elo2_all = elo_ratings_all[player2]
                         
-                        # Determine surface-specific Elo ratings
-                        if surface == "Clay":
-                            elo1_surface = elo_ratings_clay[player1]
-                            elo2_surface = elo_ratings_clay[player2]
-                        elif surface == "Hard":
-                            elo1_surface = elo_ratings_hard[player1]
-                            elo2_surface = elo_ratings_hard[player2]
-                        elif surface == "Grass":
-                            elo1_surface = elo_ratings_grass[player1]
-                            elo2_surface = elo_ratings_grass[player2]
+                        # Determine Surface-specific Elo ratings
+                        if Surface == "Clay":
+                            elo1_Surface = elo_ratings_clay[player1]
+                            elo2_Surface = elo_ratings_clay[player2]
+                        elif Surface == "Hard":
+                            elo1_Surface = elo_ratings_hard[player1]
+                            elo2_Surface = elo_ratings_hard[player2]
+                        elif Surface == "Grass":
+                            elo1_Surface = elo_ratings_grass[player1]
+                            elo2_Surface = elo_ratings_grass[player2]
                         else:
-                            elo1_surface = elo_ratings_all[player1]
-                            elo2_surface = elo_ratings_all[player2]
+                            elo1_Surface = elo_ratings_all[player1]
+                            elo2_Surface = elo_ratings_all[player2]
                         
-                        # Calculate combined Elo for both players (weighted average of overall and surface-specific ratings)
-                        combined_elo1 = weight_all * elo1_all + weight_surface * elo1_surface
-                        combined_elo2 = weight_all * elo2_all + weight_surface * elo2_surface
+                        # Calculate combined Elo for both players (weighted average of overall and Surface-specific ratings)
+                        combined_elo1 = weight_all * elo1_all + weight_Surface * elo1_Surface
+                        combined_elo2 = weight_all * elo2_all + weight_Surface * elo2_Surface
                         
                         # Calculate expected probabilities based on overall Elo
                         expected_probA = 1 / (1 + 10 ** ((elo2_all - elo1_all) / 400))
                         expected_probA_2 = 1 - expected_probA
                         
-                        # Calculate expected probabilities based on surface Elo (combined Elo)
+                        # Calculate expected probabilities based on Surface Elo (combined Elo)
                         expected_probS = 1 / (1 + 10 ** ((combined_elo2 - combined_elo1) / 400))
                         expected_probS_2 = 1 - expected_probS
                         
@@ -3034,4 +3135,5 @@ if about is True:
             st.divider()
             st.subheader("Few rows of 'Elo' dataframe")
             st.dataframe(elo_df.head(50))
-
+        
+       
