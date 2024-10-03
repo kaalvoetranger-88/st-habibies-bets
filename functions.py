@@ -22,17 +22,14 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Set directories and ignore warnings (edit this sections when deploying)
-base_dir = os.path.expanduser("~/Desktop/tennis_app/")
-data_dir = os.path.join(base_dir, "datasets/")
-os.makedirs(base_dir, exist_ok=True)
-os.makedirs(data_dir, exist_ok=True)
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-warnings.filterwarnings("ignore", category=FutureWarning)
-
-# Load datasets
-matches = pd.read_csv(data_dir + "matches_v1.csv")
-players = pd.read_csv(data_dir + "atp_players_v1.csv")
+#%% local variables (these are generated in main.py)
+app_dir = os.getcwd()
+data_dir = os.path.expanduser("~app_dir/datasets/")
+g_url1 = 'https://raw.githubusercontent.com/kaalvoetranger-88/st-habibies-bets/main/datasets/matches_v1.csv'
+g_url2 = 'https://raw.githubusercontent.com/kaalvoetranger-88/st-habibies-bets/main/datasets/atp_players_v1.csv'
+matches = pd.read_csv(g_url1)
+players = pd.read_csv(g_url2)
+    
 matches['Date'] = pd.to_datetime(matches['Date'])
 players['dob'] = pd.to_datetime(players['dob'])
 
